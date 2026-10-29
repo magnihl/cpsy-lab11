@@ -85,8 +85,14 @@ WHEEL_DIAMETER_CM = 4.8
 WHEEL_CIRCUMFERENCE_CM = 3.14159 * WHEEL_DIAMETER_CM   # 15.1 cm
 
 
-# centre to centre across the two wheels, measured 13 Oct
+# centre to centre across the two wheels, measured 13 Oct. replace with
+# the mean of calibrate.py circle left and right
 TRACK_CM = 10.8
+
+# cm per encoder pulse, per wheel. until calibrate.py roll is run, the
+# circumference over PULSES_PER_REV
+LEFT_CM_PER_PULSE = WHEEL_CIRCUMFERENCE_CM / PULSES_PER_REV
+RIGHT_CM_PER_PULSE = WHEEL_CIRCUMFERENCE_CM / PULSES_PER_REV
 
 
 def rpm_to_cm_s(rpm):
