@@ -6,8 +6,11 @@
   python3 calibrate.py circle right
 
 roll: drive slowly past a measured length, stop with Enter, then type
-the distance the rover really moved, from a ruler. Prints the pulses and
-cm per pulse of each wheel. Put them in config.py.
+the distance the rover really moved, from a ruler, and how far it ended
+to the side of the line it was aimed along. A curve means the outer
+wheel rolled further, so each wheel gets its own distance:
+heading = 2 x side / distance, outer - inner = track x heading.
+Prints the pulses and cm per pulse of each wheel. Put them in config.py.
 
 circle: stop at the start mark after some full turns, then type how many.
 Uses the cm per pulse in config.py, so run roll first.
@@ -77,7 +80,10 @@ finally:
 print(f"pulses  left {pulses[0]}  right {pulses[1]}")
 if MODE == "roll":
     cm = float(input("cm the rover moved, by ruler: "))
-    result = (cm / pulses[0], cm / pulses[1])
+    side = float(input("cm to the side, right positive: "))
+    # a right curve has the left wheel outside
+    gap = config.TRACK_CM * 2 * side / cm
+    result = ((cm + gap / 2) / pulses[0], (cm - gap / 2) / pulses[1])
     print(f"LEFT_CM_PER_PULSE = {result[0]:.5f}")
     print(f"RIGHT_CM_PER_PULSE = {result[1]:.5f}")
 else:
@@ -95,6 +101,6 @@ with open(name, "w", newline="") as f:
     w.writerow(["mode", "side", "left_target", "right_target",
                 "left_pulses", "right_pulses", "entered", "result"])
     w.writerow([MODE, SIDE if MODE == "circle" else "", *targets, *pulses,
-                cm if MODE == "roll" else turns,
+                f"{cm} {side}" if MODE == "roll" else turns,
                 " ".join(f"{r:.5f}" for r in result)])
 print(f"wrote {name}")
