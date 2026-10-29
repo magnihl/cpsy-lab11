@@ -89,10 +89,12 @@ WHEEL_CIRCUMFERENCE_CM = 3.14159 * WHEEL_DIAMETER_CM   # 15.1 cm
 # the mean of calibrate.py circle left and right
 TRACK_CM = 10.8
 
-# cm per encoder pulse, per wheel. until calibrate.py roll is run, the
-# circumference over PULSES_PER_REV
-LEFT_CM_PER_PULSE = WHEEL_CIRCUMFERENCE_CM / PULSES_PER_REV
-RIGHT_CM_PER_PULSE = WHEEL_CIRCUMFERENCE_CM / PULSES_PER_REV
+# cm per encoder pulse, per wheel. calibrate.py roll, 2 m, three runs,
+# 29 Oct: left 0.02036 0.02048 0.02039, right 0.02031 0.02044 0.02037.
+# 6.6 percent below circumference / PULSES_PER_REV (0.02176), likely the
+# tyres squashing under the rover's weight
+LEFT_CM_PER_PULSE = 0.02041
+RIGHT_CM_PER_PULSE = 0.02037
 
 
 def rpm_to_cm_s(rpm):
