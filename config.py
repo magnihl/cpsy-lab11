@@ -85,9 +85,11 @@ WHEEL_DIAMETER_CM = 4.8
 WHEEL_CIRCUMFERENCE_CM = 3.14159 * WHEEL_DIAMETER_CM   # 15.1 cm
 
 
-# centre to centre across the two wheels, measured 13 Oct. replace with
-# the mean of calibrate.py circle left and right
-TRACK_CM = 10.8
+# effective track width, calibrate.py circle at 20 / 40 rpm, 2 turns,
+# 29 Oct: left 13.10 13.07 13.22, right 13.28 13.34 13.16. 22 percent
+# above the 10.8 cm ruler measurement centre to centre: the tyres slip
+# sideways in a turn, so the rover turns less than the geometry says
+TRACK_CM = 13.20
 
 # cm per encoder pulse, per wheel. calibrate.py roll, 2 m, three runs,
 # 29 Oct: left 0.02036 0.02048 0.02039, right 0.02031 0.02044 0.02037.
