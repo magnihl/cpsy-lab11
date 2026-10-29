@@ -139,3 +139,13 @@ EDGE_MARGIN = 1.1
 # the stripes left to right, seen in the direction the rover drives.
 # driving the track the other way round reverses this
 TRACK_ORDER = ("red", "blue", "green")
+
+
+# --- per rover -----------------------------------------------------
+# another rover running this code puts its own pins and calibration in
+# config_local.py (gitignored), e.g. LEFT_CM_PER_PULSE = 0.0205, so it
+# never overwrites these
+try:
+    from config_local import *  # noqa: F401,F403
+except ImportError:
+    pass

@@ -13,7 +13,7 @@ from estop import EStop
 from rover import Rover
 
 
-def run(stdscr, rover, estop, tick=None):
+def run(stdscr, rover, estop):
     # curses.wrapper does initscr, cbreak, noecho and keypad, but not
     # this. Without it getch blocks and the idle timeout never runs.
     stdscr.nodelay(1)
@@ -32,13 +32,7 @@ def run(stdscr, rover, estop, tick=None):
     moving = False
     shown = None
 
-    # what the wheels were last told to do, for tick(). None until the
-    # first key, then kept through idle, since the wheels coast that way
-    driving = None
-
     while True:
-        if tick is not None:
-            tick(driving)
         stdscr.refresh()
         key = stdscr.getch()
         now = time.monotonic()
@@ -65,8 +59,6 @@ def run(stdscr, rover, estop, tick=None):
             label, action = actions[key]
             stdscr.addstr(1, 2, label)
             action()
-            if label.strip() != "stop":
-                driving = label.strip()
             prev_press = last_press
             last_press = now
             moving = True
