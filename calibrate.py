@@ -91,7 +91,7 @@ finally:
 print(f"pulses  left {pulses[0]}  right {pulses[1]}")
 if MODE == "roll":
     forward = float(input("cm forward, along the tape measure: "))
-    side = float(input("cm to the side, right positive: "))
+    side = float(input("cm to the side, right positive, Enter for 0: ") or 0)
     cm = math.hypot(forward, side)
     # a right curve has the left wheel outside
     gap = config.TRACK_CM * 2 * side / cm
@@ -103,7 +103,7 @@ elif MODE == "check":
     right_cm = pulses[1] * config.RIGHT_CM_PER_PULSE
     encoder = (left_cm + right_cm) / 2
     forward = float(input("cm forward, along the tape measure: "))
-    side = float(input("cm to the side, right positive: "))
+    side = float(input("cm to the side, right positive, Enter for 0: ") or 0)
     cm = math.hypot(forward, side)
     result = (encoder, cm, (encoder - cm) / cm * 100)
     print(f"encoders {encoder:.1f} cm  tape {cm:.1f} cm  "
