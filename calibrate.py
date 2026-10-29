@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Measure cm per pulse for each wheel, and the track width.
 
-  python3 calibrate.py roll            drive straight, Ctrl+C to stop
-  python3 calibrate.py circle left     40 / 20 rpm circle, Ctrl+C to stop
+  python3 calibrate.py roll            drive straight, Enter to stop
+  python3 calibrate.py circle left     40 / 20 rpm circle, Enter to stop
   python3 calibrate.py circle right
 
-roll: drive slowly past a measured length, stop with Ctrl+C, then type
+roll: drive slowly past a measured length, stop with Enter, then type
 the distance the rover really moved, from a ruler. Prints the pulses and
 cm per pulse of each wheel. Put them in config.py.
 
@@ -19,6 +19,7 @@ Every run is logged to calibrate_<mode>_<time>.csv.
 
 import csv
 import math
+import select
 import sys
 import time
 
@@ -51,19 +52,18 @@ right = Wheel(config.RIGHT_ENCODER)
 control = SpeedController(rover, left, right)
 
 print(f"{MODE} {SIDE if MODE == 'circle' else ''} at "
-      f"{targets[0]:.0f} / {targets[1]:.0f} rpm, Ctrl+C to stop")
+      f"{targets[0]:.0f} / {targets[1]:.0f} rpm, Enter to stop")
 
 try:
     estop.arm()
     left.reset()
     right.reset()
     control.target(*targets)
-    try:
-        while True:
-            time.sleep(config.CONTROL_INTERVAL)
-            control.update()
-    except KeyboardInterrupt:
-        pass
+    # Enter stops it. Ctrl+C left GPIO25 unwritable in estop.close(), 29 Oct.
+    # select waits one control interval for a key, so it is the loop sleep
+    while not select.select([sys.stdin], [], [], config.CONTROL_INTERVAL)[0]:
+        control.update()
+    sys.stdin.readline()
     control.stop()
     # the wheels coast a little after the stop, count that too
     time.sleep(0.5)
