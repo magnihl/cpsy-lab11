@@ -81,7 +81,8 @@ def _logged_step(self, now, ticks):
                   round(self.odometer.s, 2), round(self.odometer.heading, 4),
                   round(self.master_s - (self.odometer.s - self.gap), 2),
                   round(ticks[0], 1), round(ticks[1], 1),
-                  round(powers[0], 3), round(powers[1], 3)))
+                  round(powers[0], 3), round(powers[1], 3), HEADING_SCALE,
+                  DIST_SCALE))
     return powers
 
 
@@ -92,7 +93,7 @@ def _write():
         w.writerow(["t", "run", "state", "since_packet", "master_s",
                     "master_cm_s", "master_heading", "own_s", "own_heading",
                     "gap", "left_ticks", "right_ticks", "left_power",
-                    "right_power"])
+                    "right_power", "heading_scale", "dist_scale"])
         w.writerows(_rows)
     print(f"wrote {name}, {len(_rows)} rows, heading scale {HEADING_SCALE}, "
           f"distance scale {DIST_SCALE}")
