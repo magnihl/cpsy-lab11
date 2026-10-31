@@ -5,6 +5,7 @@ convoy (github.com/ManiTiTz/raunkerfi, linefollower/convoy/README.md).
   python3 convoy_slave.py --gap 60
   python3 convoy_slave.py --gap 60 --heading-scale 1.01
   python3 convoy_slave.py --wiggle-test        one wiggle, no master
+  python3 convoy_slave.py --wiggle-test --wiggle-power 0.12 --wiggle-coast 0.2
 
 The master streams its map on UDP 5005: one JSON object per packet with
 its run number, whether it is driving, and its distance s_cm and heading
@@ -13,7 +14,7 @@ gap cm straight behind the master, rebuilds the master's path as points
 (s, x, y) and drives it by pure pursuit, its speed set by the gap along
 the path. It joins only a run whose start it heard, stops if the master
 goes quiet for LOST_S, and brakes to its gap when the run ends. A
-"wiggle" command turns it 5 degrees each way, twice, on the spot. Status
+"wiggle" command turns it 5 degrees left and back, twice, on the spot. Status
 goes to the laptop's live view on UDP 5006.
 
 The two scales match this rover to the master's counting: both count
@@ -69,13 +70,14 @@ I_MAX = 10.0
 WIGGLE_DEGREES = 5.0
 WIGGLE_TIMES = 2
 WIGGLE_STEP_S = 1.0
-WIGGLE_SETTLE_S = 0.15
-# power per hundredth of a cm off target, and its range. 0.2 to 0.3 is 38
-# to 44 cm/s here and shot past the 0.6 cm a wheel moves for 5 degrees
-WIGGLE_GAIN = 0.002
-WIGGLE_MIN_POWER = 0.08
-WIGGLE_MAX_POWER = 0.12
-WIGGLE_TOLERANCE = 8.0
+WIGGLE_SETTLE_S = 0.1
+# just above where the motors start, about 0.05. 0.2 to 0.3 is 38 to 44
+# cm/s here and shot past the 0.6 cm a wheel moves for 5 degrees
+WIGGLE_POWER = 0.10
+# hundredths of a cm, a wheel this close to its goal stops
+WIGGLE_TOLERANCE = 5.0
+# how long a wheel keeps rolling after its power goes, roughly
+WIGGLE_COAST_S = 0.15
 
 
 def clamp(value, low, high):
@@ -302,40 +304,42 @@ class Slave:
 
 
 def wiggle(ticks, motors, interrupted=None):
-    """5 degrees each way, twice, on the spot, back to the start.
+    """Turn 5 degrees left and back, twice, on the spot.
 
-    Each wheel is steered to its own position, so both end where they
-    began: steering the heading alone let the rover creep backwards.
-    Returns the degrees left over from the start heading.
+    Four moves and nothing else: each wheel drives at WIGGLE_POWER toward
+    its own goal and stops on reaching it, never correcting backwards, so
+    it cannot hunt. Every goal is measured from the start, so an overshoot
+    does not add up. Returns the degrees left over from the start heading.
     """
     per_degree = TICKS_PER_CM * config.TRACK_CM * math.pi / 180
     l0, r0 = ticks()
     try:
-        for target in [WIGGLE_DEGREES, -WIGGLE_DEGREES] * WIGGLE_TIMES + [0.0]:
+        for target in [WIGGLE_DEGREES, 0.0] * WIGGLE_TIMES:
             half = target * per_degree / 2
-            goal = (l0 - half, r0 + half)
+            goals = (l0 - half, r0 + half)
+            now = ticks()
+            # which way each wheel has to go, 0 if it is there already
+            ways = [0 if abs(g - t) < WIGGLE_TOLERANCE else
+                    math.copysign(1, g - t) for g, t in zip(goals, now)]
             end = time.monotonic() + WIGGLE_STEP_S
-            settled = None
-            while time.monotonic() < end:
-                errors = [g - t for g, t in zip(goal, ticks())]
-                if all(abs(e) < WIGGLE_TOLERANCE for e in errors):
-                    motors(0, 0)
-                    settled = settled or time.monotonic()
-                    if time.monotonic() - settled > WIGGLE_SETTLE_S:
-                        break
-                else:
-                    settled = None
-                    motors(*(0.0 if abs(e) < WIGGLE_TOLERANCE else
-                             math.copysign(clamp(abs(e) * WIGGLE_GAIN,
-                                                 WIGGLE_MIN_POWER,
-                                                 WIGGLE_MAX_POWER), e)
-                             for e in errors))
+            then, was = time.monotonic(), now
+            while any(ways) and time.monotonic() < end:
+                now = ticks()
+                dt = max(time.monotonic() - then, 1e-3)
+                for i in range(2):
+                    # the wheel rolls on about speed x WIGGLE_COAST_S after
+                    # its power goes, so it stops that much early
+                    coast = abs(now[i] - was[i]) / dt * WIGGLE_COAST_S
+                    if ways[i] and ((goals[i] - now[i]) * ways[i]
+                                    < WIGGLE_TOLERANCE + coast):
+                        ways[i] = 0
+                then, was = time.monotonic(), now
+                motors(*(w * WIGGLE_POWER for w in ways))
                 if interrupted and interrupted():
-                    break
+                    return 0.0
                 time.sleep(0.005)
             motors(0, 0)
-            if interrupted and interrupted():
-                break
+            time.sleep(WIGGLE_SETTLE_S)
     finally:
         motors(0, 0)
     left, right = ticks()
@@ -345,7 +349,7 @@ def wiggle(ticks, motors, interrupted=None):
 
 
 def main():
-    global WIGGLE_MIN_POWER, WIGGLE_MAX_POWER
+    global WIGGLE_POWER, WIGGLE_COAST_S
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--name", default=socket.gethostname().split(".")[0])
     parser.add_argument("--gap", type=float, default=60.0,
@@ -358,14 +362,16 @@ def main():
                         default=config.CONVOY_DIST_SCALE)
     parser.add_argument("--wiggle-test", action="store_true",
                         help="one wiggle on the spot and exit")
-    parser.add_argument("--wiggle-min", type=float, default=WIGGLE_MIN_POWER)
-    parser.add_argument("--wiggle-max", type=float, default=WIGGLE_MAX_POWER)
+    parser.add_argument("--wiggle-power", type=float, default=WIGGLE_POWER)
+    parser.add_argument("--wiggle-coast", type=float, default=WIGGLE_COAST_S,
+                        help="s a wheel rolls on after stopping: more stops "
+                        "earlier")
     args = parser.parse_args()
-    WIGGLE_MIN_POWER, WIGGLE_MAX_POWER = args.wiggle_min, args.wiggle_max
+    WIGGLE_POWER, WIGGLE_COAST_S = args.wiggle_power, args.wiggle_coast
 
     import hw
     if args.wiggle_test:
-        print(f"wiggle test, power {WIGGLE_MIN_POWER} to {WIGGLE_MAX_POWER}")
+        print(f"wiggle test, power {WIGGLE_POWER}, coast {WIGGLE_COAST_S} s")
         print(f"ended {wiggle(hw.ticks, hw.motors):+.1f} degrees "
               "from the start heading")
         return
