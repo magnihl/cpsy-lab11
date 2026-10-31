@@ -23,9 +23,8 @@ slave.TRACK_CM = config.TRACK_CM
 slave.SPEED_TABLE = ((0.0, 0.0), (0.05, 2.9), (0.10, 22.0), (0.15, 32.0),
                      (0.20, 37.8), (0.25, 41.4), (0.30, 44.3), (0.50, 49.8),
                      (1.0, 54.4))
-# the master's convoy speed peaks near 39 cm/s. kept at slave.py's 45
-# until the floor top speed is measured
-slave.MAX_CM_S = 45.0
+# no speed limit: a target above the table's top just gives full power
+slave.MAX_CM_S = float("inf")
 
 # every control step logged, to see why a run does not move: time since
 # the last packet, the master's distance and speed, our gap and powers
