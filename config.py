@@ -24,8 +24,9 @@ ENCODER_PIN_A = "GPIO5"
 ENCODER_PIN_B = "GPIO26"
 
 # spikes shorter than this on an encoder wire are not counted. 0 turns the
-# filter off. a real pulse at 40 cm/s lasts about 275 us
-ENCODER_GLITCH_US = 0
+# filter off. the shortest real pulse, full power 54 cm/s, lasts about
+# 190 us. on since 31 Oct: slave.py crept while its odometry said 9 cm/s
+ENCODER_GLITCH_US = 50
 
 # which driver channel is which side. wheeltest.py, 20 Oct: the code's
 # left spun the physical right wheel. never mattered before Lab 10,
