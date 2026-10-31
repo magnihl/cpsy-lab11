@@ -3,6 +3,7 @@
 
   python3 slave_rover.py --gap 60          options as slave.py
   python3 slave_rover.py --gap 60 --heading-scale 1.04 --dist-scale 0.98
+  python3 slave_rover.py --wiggle-test --wiggle-min 0.08 --wiggle-max 0.12
 
 slave.py is Mani's convoy slave, unchanged. Its constants are his car,
 so they are set here before it runs. hw.py is this rover's adapter.
@@ -113,7 +114,12 @@ def _write():
 # for +5 degrees the left wheel goes back and the right forward by the
 # same arc, and at the end both go back to where they started. same
 # steps as slave.py's, so the master's "wiggle" means the same
-WIGGLE_GAIN = 0.004       # power per hundredth of a cm off target
+# slave.py's 0.2 to 0.3 power is 38 to 44 cm/s here, so the wheels shot
+# past the 0.6 cm a wheel moves for 5 degrees and hunted, 31 Oct. just
+# above where the motors start (about 0.05) instead
+WIGGLE_MIN_POWER = _take("--wiggle-min", 0.08)
+WIGGLE_MAX_POWER = _take("--wiggle-max", 0.12)
+WIGGLE_GAIN = 0.002       # power per hundredth of a cm off target
 WIGGLE_TOLERANCE = 8.0    # hundredths of a cm, under half a degree
 WIGGLE_SETTLE_S = 0.15
 
@@ -144,8 +150,8 @@ def _wheel_wiggle(ticks, motors, ticks_per_degree, on_step=None):
                     motors(*(0.0 if abs(e) < WIGGLE_TOLERANCE else
                              math.copysign(slave.clamp(
                                  abs(e) * WIGGLE_GAIN,
-                                 slave.WIGGLE_MIN_POWER,
-                                 slave.WIGGLE_POWER), e)
+                                 WIGGLE_MIN_POWER,
+                                 WIGGLE_MAX_POWER), e)
                              for e in errors))
                 if on_step and on_step():
                     return turned()
@@ -158,6 +164,15 @@ def _wheel_wiggle(ticks, motors, ticks_per_degree, on_step=None):
           f" cm from start")
     return turned()
 
+
+if __name__ == "__main__" and "--wiggle-test" in sys.argv:
+    # one wiggle on the spot, no master needed, for tuning the powers
+    import hw
+    per_degree = slave.TICKS_PER_CM * slave.TRACK_CM * math.pi / 180
+    print(f"wiggle test, power {WIGGLE_MIN_POWER} to {WIGGLE_MAX_POWER}")
+    left_over = _wheel_wiggle(hw.ticks, hw.motors, per_degree)
+    print(f"ended {left_over:+.1f} degrees from the start heading")
+    sys.exit()
 
 if __name__ == "__main__":
     slave.wiggle = _wheel_wiggle
