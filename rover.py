@@ -56,6 +56,8 @@ class Wheel:
         self._gpio = int(pin.replace("GPIO", ""))
         pi.set_mode(self._gpio, pigpio.INPUT)
         pi.set_pull_up_down(self._gpio, pigpio.PUD_UP)
+        # pigpiod ignores level changes shorter than this, in C. 0 is off
+        pi.set_glitch_filter(self._gpio, config.ENCODER_GLITCH_US)
         # no function, so pigpio keeps the count itself
         self._cb = pi.callback(self._gpio, pigpio.RISING_EDGE)
         self._ppr = pulses_per_rev

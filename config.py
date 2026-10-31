@@ -23,6 +23,10 @@ ENCODER_PIN_A = "GPIO5"
 # single channel counting does not care which of the two it uses
 ENCODER_PIN_B = "GPIO26"
 
+# spikes shorter than this on an encoder wire are not counted. 0 turns the
+# filter off. a real pulse at 40 cm/s lasts about 275 us
+ENCODER_GLITCH_US = 0
+
 # which driver channel is which side. wheeltest.py, 20 Oct: the code's
 # left spun the physical right wheel. never mattered before Lab 10,
 # both wheels always ran at the same speed. each encoder stays with its
