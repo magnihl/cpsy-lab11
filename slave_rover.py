@@ -3,7 +3,6 @@
 
   python3 slave_rover.py --gap 60          options as slave.py
   python3 slave_rover.py --gap 60 --heading-scale 1.04 --dist-scale 0.98
-  python3 slave_rover.py --gap 60 --wiggle    wiggle on, off by default
 
 slave.py is Mani's convoy slave, unchanged. Its constants are his car,
 so they are set here before it runs. hw.py is this rover's adapter.
@@ -53,12 +52,7 @@ def _take(flag, default):
 
 
 HEADING_SCALE = _take("--heading-scale", config.CONVOY_HEADING_SCALE)
-# the wiggle runs a wheel backwards, and one encoder wire cannot tell
-# direction: the rover crept back and ended off its start mark, 31 Oct.
-# off unless asked for, the terminal shows the master is heard anyway
-WIGGLE = "--wiggle" in sys.argv
-if WIGGLE:
-    sys.argv.remove("--wiggle")
+
 DIST_SCALE = _take("--dist-scale", config.CONVOY_DIST_SCALE)
 
 _hear = slave.Slave.hear
@@ -113,14 +107,60 @@ def _write():
               f"{last[7]:.0f} cm, turned {math.degrees(last[8]):+.0f} deg")
 
 
-def _no_wiggle(ticks, motors, ticks_per_degree, on_step=None):
-    print("(wiggle skipped on this rover, --wiggle turns it on)")
-    return 0.0
+# slave.py's wiggle steers the heading only. on this rover the wheels run
+# at different speeds back and forth, so it crept backwards and ended off
+# its start mark, 31 Oct. this one steers each wheel to its own position:
+# for +5 degrees the left wheel goes back and the right forward by the
+# same arc, and at the end both go back to where they started. same
+# steps as slave.py's, so the master's "wiggle" means the same
+WIGGLE_GAIN = 0.004       # power per hundredth of a cm off target
+WIGGLE_TOLERANCE = 8.0    # hundredths of a cm, under half a degree
+WIGGLE_SETTLE_S = 0.15
+
+
+def _wheel_wiggle(ticks, motors, ticks_per_degree, on_step=None):
+    l0, r0 = ticks()
+
+    def turned():
+        left, right = ticks()
+        return ((right - r0) - (left - l0)) / ticks_per_degree
+
+    try:
+        for target in ([slave.WIGGLE_DEGREES, -slave.WIGGLE_DEGREES]
+                       * slave.WIGGLE_TIMES + [0.0]):
+            half = target * ticks_per_degree / 2
+            goal = (l0 - half, r0 + half)
+            end = time.monotonic() + slave.WIGGLE_STEP_S
+            settled = None
+            while time.monotonic() < end:
+                errors = [g - t for g, t in zip(goal, ticks())]
+                if all(abs(e) < WIGGLE_TOLERANCE for e in errors):
+                    motors(0, 0)
+                    settled = settled or time.monotonic()
+                    if time.monotonic() - settled > WIGGLE_SETTLE_S:
+                        break
+                else:
+                    settled = None
+                    motors(*(0.0 if abs(e) < WIGGLE_TOLERANCE else
+                             math.copysign(slave.clamp(
+                                 abs(e) * WIGGLE_GAIN,
+                                 slave.WIGGLE_MIN_POWER,
+                                 slave.WIGGLE_POWER), e)
+                             for e in errors))
+                if on_step and on_step():
+                    return turned()
+                time.sleep(0.005)
+            motors(0, 0)
+    finally:
+        motors(0, 0)
+    left, right = ticks()
+    print(f"wiggle: wheels {(left - l0) / 100:+.2f} / {(right - r0) / 100:+.2f}"
+          f" cm from start")
+    return turned()
 
 
 if __name__ == "__main__":
-    if not WIGGLE:
-        slave.wiggle = _no_wiggle
+    slave.wiggle = _wheel_wiggle
     slave.Slave.hear = _scaled_hear
     slave.Slave.step = _logged_step
     atexit.register(_write)
