@@ -146,6 +146,13 @@ EDGE_MARGIN = 1.1
 TRACK_ORDER = ("red", "blue", "green")
 
 
+# --- convoy --------------------------------------------------------
+# slave_rover.py scales the master's map by these before following it,
+# to match this rover to the master's counting. 1.0 is no change. tuned
+# on closed laps, see slave_rover.py
+CONVOY_HEADING_SCALE = 1.0
+CONVOY_DIST_SCALE = 1.0
+
 # --- per rover -----------------------------------------------------
 # another rover running this code puts its own pins and calibration in
 # config_local.py (gitignored), e.g. LEFT_CM_PER_PULSE = 0.0205, so it
