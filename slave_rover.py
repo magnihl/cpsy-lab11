@@ -3,6 +3,7 @@
 
   python3 slave_rover.py --gap 60          options as slave.py
   python3 slave_rover.py --gap 60 --heading-scale 1.04 --dist-scale 0.98
+  python3 slave_rover.py --gap 60 --wiggle    wiggle on, off by default
 
 slave.py is Mani's convoy slave, unchanged. Its constants are his car,
 so they are set here before it runs. hw.py is this rover's adapter.
@@ -52,6 +53,12 @@ def _take(flag, default):
 
 
 HEADING_SCALE = _take("--heading-scale", config.CONVOY_HEADING_SCALE)
+# the wiggle runs a wheel backwards, and one encoder wire cannot tell
+# direction: the rover crept back and ended off its start mark, 31 Oct.
+# off unless asked for, the terminal shows the master is heard anyway
+WIGGLE = "--wiggle" in sys.argv
+if WIGGLE:
+    sys.argv.remove("--wiggle")
 DIST_SCALE = _take("--dist-scale", config.CONVOY_DIST_SCALE)
 
 _hear = slave.Slave.hear
@@ -106,7 +113,14 @@ def _write():
               f"{last[7]:.0f} cm, turned {math.degrees(last[8]):+.0f} deg")
 
 
+def _no_wiggle(ticks, motors, ticks_per_degree, on_step=None):
+    print("(wiggle skipped on this rover, --wiggle turns it on)")
+    return 0.0
+
+
 if __name__ == "__main__":
+    if not WIGGLE:
+        slave.wiggle = _no_wiggle
     slave.Slave.hear = _scaled_hear
     slave.Slave.step = _logged_step
     atexit.register(_write)
