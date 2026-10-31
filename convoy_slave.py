@@ -14,7 +14,8 @@ gap cm straight behind the master, rebuilds the master's path as points
 (s, x, y) and drives it by pure pursuit, its speed set by the gap along
 the path. It joins only a run whose start it heard, stops if the master
 goes quiet for LOST_S, and brakes to its gap when the run ends. A
-"wiggle" command turns it 5 degrees left and back, twice, on the spot. Status
+"wiggle" command turns it 5 degrees left, then right, twice, on the spot,
+and back to straight, as the master does. Status
 goes to the laptop's live view on UDP 5006.
 
 The two scales match this rover to the master's counting: both count
@@ -78,6 +79,8 @@ WIGGLE_POWER = 0.10
 WIGGLE_TOLERANCE = 5.0
 # how long a wheel keeps rolling after its power goes, roughly
 WIGGLE_COAST_S = 0.15
+# one nudge for a wheel that stopped short
+WIGGLE_NUDGE_S = 0.015
 
 
 def clamp(value, low, high):
@@ -304,23 +307,25 @@ class Slave:
 
 
 def wiggle(ticks, motors, interrupted=None):
-    """Turn 5 degrees left and back, twice, on the spot.
+    """The master's wiggle: 5 degrees left, 5 right, twice, then straight.
 
-    Four moves and nothing else: each wheel drives at WIGGLE_POWER toward
-    its own goal and stops on reaching it, never correcting backwards, so
-    it cannot hunt. Every goal is measured from the start, so an overshoot
-    does not add up. Returns the degrees left over from the start heading.
+    Each move: both wheels drive at WIGGLE_POWER toward their own goals
+    and stop a little early, by how far they still roll. A wheel still
+    short of its goal then gets short nudges the same way, never back, so
+    it cannot hunt. Every goal is measured from the start, so errors do
+    not add up. Returns the degrees left over from the start heading.
     """
     per_degree = TICKS_PER_CM * config.TRACK_CM * math.pi / 180
     l0, r0 = ticks()
     try:
-        for target in [WIGGLE_DEGREES, 0.0] * WIGGLE_TIMES:
+        for target in [WIGGLE_DEGREES, -WIGGLE_DEGREES] * WIGGLE_TIMES + [0.0]:
             half = target * per_degree / 2
             goals = (l0 - half, r0 + half)
             now = ticks()
             # which way each wheel has to go, 0 if it is there already
             ways = [0 if abs(g - t) < WIGGLE_TOLERANCE else
                     math.copysign(1, g - t) for g, t in zip(goals, now)]
+            first_ways = list(ways)
             end = time.monotonic() + WIGGLE_STEP_S
             then, was = time.monotonic(), now
             while any(ways) and time.monotonic() < end:
@@ -340,6 +345,24 @@ def wiggle(ticks, motors, interrupted=None):
                 time.sleep(0.005)
             motors(0, 0)
             time.sleep(WIGGLE_SETTLE_S)
+            # nudge a wheel that stopped short, the same way only
+            end = time.monotonic() + WIGGLE_STEP_S / 2
+            while time.monotonic() < end:
+                now = ticks()
+                short = [math.copysign(1, g - t)
+                         if abs(g - t) > WIGGLE_TOLERANCE else 0
+                         for g, t in zip(goals, now)]
+                # only the way it was going, a wheel past its goal stays
+                short = [w if w == way or not way else 0
+                         for w, way in zip(short, first_ways)]
+                if not any(short):
+                    break
+                motors(*(w * WIGGLE_POWER for w in short))
+                time.sleep(WIGGLE_NUDGE_S)
+                motors(0, 0)
+                time.sleep(WIGGLE_SETTLE_S)
+                if interrupted and interrupted():
+                    return 0.0
     finally:
         motors(0, 0)
     left, right = ticks()
