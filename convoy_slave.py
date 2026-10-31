@@ -71,10 +71,12 @@ I_MAX = 10.0
 WIGGLE_DEGREES = 5.0
 WIGGLE_TIMES = 2
 WIGGLE_STEP_S = 1.0
-WIGGLE_SETTLE_S = 0.1
-# just above where the motors start, about 0.05. 0.2 to 0.3 is 38 to 44
-# cm/s here and shot past the 0.6 cm a wheel moves for 5 degrees
-WIGGLE_POWER = 0.10
+WIGGLE_SETTLE_S = 0.05
+# the master wiggles at 0.2 to 0.3. at 0.10 this rover fell behind it,
+# 31 Oct. the early stop and the nudges keep it on target
+WIGGLE_POWER = 0.20
+# the nudges for a wheel that stopped short, gentle so they do not overshoot
+WIGGLE_NUDGE_POWER = 0.10
 # hundredths of a cm, a wheel this close to its goal stops
 WIGGLE_TOLERANCE = 5.0
 # how long a wheel keeps rolling after its power goes, roughly
@@ -357,7 +359,7 @@ def wiggle(ticks, motors, interrupted=None):
                          for w, way in zip(short, first_ways)]
                 if not any(short):
                     break
-                motors(*(w * WIGGLE_POWER for w in short))
+                motors(*(w * WIGGLE_NUDGE_POWER for w in short))
                 time.sleep(WIGGLE_NUDGE_S)
                 motors(0, 0)
                 time.sleep(WIGGLE_SETTLE_S)
