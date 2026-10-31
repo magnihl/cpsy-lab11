@@ -1,11 +1,10 @@
-"""ticks() and motors() for slave.py on this rover.
+"""ticks() and motors() for convoy_slave.py on this rover.
 
-slave.py (github.com/ManiTiTz/raunkerfi, linefollower/convoy) drives any
-car through a module named hw with these two functions. This one wraps
-rover.py.
+Any convoy slave drives the rover through these two functions. This one
+wraps rover.py.
 
 ticks() returns each wheel's signed distance in hundredths of a cm, so
-slave_rover.py sets TICKS_PER_CM = 100 and both wheels keep their own
+convoy_slave.py uses TICKS_PER_CM = 100 and both wheels keep their own
 calibration. The tally has no sign, so new pulses take the sign of the
 direction last commanded to that wheel, kept through power 0, since the
 wheel coasts the way it was going.
@@ -68,7 +67,7 @@ def motors(left, right):
 
 
 def _close():
-    # slave.py has already set the motors to 0. after Ctrl+C, close() once
+    # the slave has already set the motors to 0. after Ctrl+C, close() once
     # found GPIO25 unwritable (29 Oct), and a crash here would hide that
     for step in (*(m.stop for m in _motors), _estop.close,
                  *(w.close for w in _wheels), disconnect):

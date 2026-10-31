@@ -25,7 +25,7 @@ ENCODER_PIN_B = "GPIO26"
 
 # spikes shorter than this on an encoder wire are not counted. 0 turns the
 # filter off. the shortest real pulse, full power 54 cm/s, lasts about
-# 190 us. on since 31 Oct: slave.py crept while its odometry said 9 cm/s
+# 190 us. on since 31 Oct: the convoy slave crept while its odometry said 9 cm/s
 ENCODER_GLITCH_US = 50
 
 # which driver channel is which side. wheeltest.py, 20 Oct: the code's
@@ -147,9 +147,9 @@ TRACK_ORDER = ("red", "blue", "green")
 
 
 # --- convoy --------------------------------------------------------
-# slave_rover.py scales the master's map by these before following it,
+# convoy_slave.py scales the master's map by these before following it,
 # to match this rover to the master's counting. 1.0 is no change. tuned
-# on closed laps, see slave_rover.py
+# on closed laps, see convoy_slave.py and tune_scale.py
 CONVOY_HEADING_SCALE = 1.0
 CONVOY_DIST_SCALE = 1.0
 

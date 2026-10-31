@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Heading scale for slave_rover.py from a closed lap.
+"""Heading scale for convoy_slave.py from a closed lap.
 
-  python3 tune_scale.py logs/slave_HHMMSS.csv LAPS
+  python3 tune_scale.py logs/convoy_slave_HHMMSS.csv LAPS
 
 The master drove LAPS full laps and stopped on its start mark, so it
 really turned LAPS x 360 degrees. Its map says something else, by its

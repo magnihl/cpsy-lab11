@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive straight through hw.py at a low power, as slave.py does, and
+"""Drive straight through hw.py at a low power, as the convoy slave does, and
 print the encoder distance, to check it against a tape measure.
 
   python3 lowpower.py POWER SECONDS [GLITCH_US]
@@ -7,7 +7,7 @@ print the encoder distance, to check it against a tape measure.
   python3 lowpower.py 0.07 5 50         spikes under 50 us ignored
 
 The power is set 50 times a second with a little noise around POWER,
-like slave.py's PI loop does, so the motors run in the same jerks.
+like the convoy slave's PI loop does, so the motors run in the same jerks.
 """
 
 import random
