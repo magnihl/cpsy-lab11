@@ -3,20 +3,31 @@
 laptop, with a simulated rover.
 
   python3 convoy_check.py ~/Projects/raunkerfi/linefollower/convoy/master-*.jsonl
+  python3 convoy_check.py --gaps logs/<slave log>.csv master-*.jsonl
 
 The recordings stay in Mani's repo, read from a local clone. The rover is
 simulated: each wheel goes to the table speed of its power with a 0.15 s
 lag, encoders exact. Prints how far the slave strays from the master's
 path and how its gap holds, at a 60 and a 120 cm gap and with 20 percent
 of packets lost.
+
+The last line per run drops the packets the real track run missed: the
+stretches of the master's path where master_s jumped in a slave log
+(default: the 2 Nov run that went off the course). Random loss drops
+single packets, the real WiFi lost whole stretches, mostly after the
+hairpin, and that is what bends the slave's map.
 """
 
+import csv
 import json
 import math
 import random
 import sys
 
 import convoy_slave as cs
+
+GAPS_LOG = "logs/convoy_slave_130407_run1793623050.csv"
+GAP_MIN_CM = 5.0
 
 STEP_S = 1 / cs.CONTROL_HZ
 LAG_S = 0.15
@@ -44,7 +55,20 @@ class SimRover:
         return tuple(c * cs.TICKS_PER_CM for c in self.cm)
 
 
-def drive(packets, gap, loss, seed=1):
+def real_gaps(path, min_cm=GAP_MIN_CM):
+    """Stretches of master path (from s, to s) a slave log never heard."""
+    with open(path) as f:
+        rows = list(csv.DictReader(f))
+    gaps, prev = [], None
+    for row in rows:
+        s = float(row["master_s"])
+        if prev is not None and s - prev > min_cm:
+            gaps.append((prev, s))
+        prev = s
+    return gaps
+
+
+def drive(packets, gap, loss, seed=1, cut=()):
     rng = random.Random(seed)
     truth = cs.Path()
     for p in packets:
@@ -63,7 +87,9 @@ def drive(packets, gap, loss, seed=1):
     while now < end:
         now += STEP_S
         while i < len(stream) and 1.0 + stream[i]["t"] <= now:
-            if rng.random() >= loss or not stream[i]["running"]:
+            p = stream[i]
+            missed = any(a < p["s_cm"] < b for a, b in cut)
+            if (rng.random() >= loss and not missed) or not p["running"]:
                 slave.hear(stream[i], now)
             i += 1
         rover.powers = list(slave.step(now, rover.ticks()))
@@ -77,7 +103,8 @@ def drive(packets, gap, loss, seed=1):
                            for k in range(lo, hi)))
             gaps.append(slave.gap_now())
     off.sort()
-    return (f"gap {gap:3.0f} cm, {loss:4.0%} lost | off path p95 "
+    lost = f"{loss:4.0%} lost" if not cut else f"{len(cut):2d} gaps "
+    return (f"gap {gap:3.0f} cm, {lost} | off path p95 "
             f"{off[int(len(off) * 0.95)]:4.1f} cm, max {off[-1]:4.1f} cm | "
             f"gap {min(gaps):5.1f} to {max(gaps):5.1f} cm | stopped "
             f"{slave.gap_now():5.1f} cm behind, {slave.state}")
@@ -88,10 +115,20 @@ def bisect_left(values, x):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
+    args = sys.argv[1:]
+    gaps_log = GAPS_LOG
+    if args[:1] == ["--gaps"]:
+        gaps_log, args = args[1], args[2:]
+    if not args:
         sys.exit(__doc__)
-    for name in sys.argv[1:]:
+    cut = real_gaps(gaps_log)
+    print(f"real gaps from {gaps_log.split('/')[-1]}: {len(cut)} stretches, "
+          f"first at {cut[0][0]:.0f} to {cut[0][1]:.0f} cm" if cut else
+          f"no gaps over {GAP_MIN_CM:.0f} cm in {gaps_log}")
+    for name in args:
         packets = [json.loads(line) for line in open(name)]
         print(name.split("/")[-1])
         for gap, loss in ((60, 0.0), (60, 0.2), (120, 0.0)):
             print("  " + drive(packets, gap, loss))
+        if cut:
+            print("  " + drive(packets, 60, 0.0, cut=cut))
