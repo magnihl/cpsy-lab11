@@ -134,7 +134,7 @@ def turn_rate_deg_s(left_rpm, right_rpm, track_cm=TRACK_CM):
 # 100 ms and gain 4 as in Lab 2. at the default 2.4 ms the blue line
 # read (4, 3, 3, 11), the same as no light. 20 Oct
 COLOUR_INTEGRATION_MS = 10
-COLOUR_GAIN = 16
+COLOUR_GAIN = 4  # at 10 ms the clear count tops out at 4096; gain 16 put white at the top
 
 # (red, green, blue, clear) on the white canvas, Exhibit 10A, 20 Oct.
 # depends on room light and sensor height, measure again each session
