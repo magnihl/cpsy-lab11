@@ -139,6 +139,15 @@ class Path:
         self.y.append(y)
         self.heading = heading
 
+    def add_at(self, s, x, y, heading):
+        """A point whose position the master sent itself, nothing integrated."""
+        if self.s and s <= self.s[-1]:
+            return
+        self.s.append(s)
+        self.x.append(x)
+        self.y.append(y)
+        self.heading = heading
+
     def point(self, s):
         """Where the master was at distance s, between two points by a
         straight line. Before its start, straight ahead of it."""
@@ -267,9 +276,21 @@ class Slave:
             print("heard the master again, carrying on")
             self.state = "follow"
         if run == self.run and self.driving:
+            # optional, if the master sends it: its last second of (s, heading),
+            # which fills a stretch of lost packets in the right shape
+            for old_s, old_heading in packet.get("recent_path", ()):
+                old_s *= self.dist_scale
+                if self.master_s < old_s < s:
+                    self.path.add(old_s, old_heading * self.heading_scale)
             if s > self.master_s:
                 self.master_s = s
-                self.path.add(s, heading)
+                if "x_cm" in packet and "y_cm" in packet:
+                    # optional: the master's own position, so a lost stretch
+                    # leaves a straight gap in the map instead of bending it
+                    self.path.add_at(s, packet["x_cm"] * self.dist_scale,
+                                     packet["y_cm"] * self.dist_scale, heading)
+                else:
+                    self.path.add(s, heading)
             t = packet.get("t", 0.0)
             if running and (not self.recent or t > self.recent[-1][0]):
                 self.recent.append((t, self.master_s))

@@ -5,10 +5,10 @@
 
 For every recorded master lap and every packet gap pattern (the real track
 runs in logs/, and the same gaps moved along the track) it drives the slave
-twice: bridging lost stretches with a straight chord (as now) and with an
-arc. The page shows the master's true path, the slave's map of it, where the
-slave drove, the lost packets, and how far off the path it was over time.
-Writes logs/convoy_view.html.
+once per fix in METHODS: the code as it is now (straight chord), an arc, and
+three changes to what the master sends. The page shows the master's true
+path, the lost packets, where the slave drove with each fix, and how far off
+the path it was over time. Writes logs/convoy_view.html.
 """
 
 import contextlib
@@ -16,6 +16,7 @@ import glob
 import io
 import json
 import os
+import statistics
 import sys
 
 # paths from the command line, resolved before moving into the repo folder
@@ -28,10 +29,21 @@ os.chdir(ROOT)
 import convoy_check as cc  # noqa: E402
 
 OUT = "logs/convoy_view.html"
-SHIFTS = (0, 40, 80)       # move the real gaps this far along the track, cm
-SEEDS = (1, 2, 3, 4, 5)    # random 20 percent loss, the old check, as a control
+SHIFTS = (0, 20, 40, 60, 80)  # move the real gaps this far along the track, cm
+SEEDS = (1, 2, 3, 4, 5)       # random 20 percent loss, the old check, as a control
 GAP = 60
-SIZE = 360                 # plot width and height in px
+SIZE = 360                    # plot width and height in px
+BAD_CM = 5.0                  # off the path by more than this counts as a bad run
+
+# name, what changes, simulate() options, colour, drawn in the top view
+METHODS = [
+    ("now", "the slave as it is: straight chord across a gap", {}, "--now", True),
+    ("arc", "slave bridges a gap with an arc", {"arc": True}, "--arc", False),
+    ("x, y", "master also sends its own x, y", {"master": "xy"}, "--xy", True),
+    ("history", "master also resends its last 2 s of (s, heading)",
+     {"master": "history"}, "--hist", True),
+    ("both", "master sends x, y and its last 2 s", {"master": "both"}, "--both", False),
+]
 
 
 def gap_patterns():
@@ -58,132 +70,125 @@ def worst(r):
     return max(r["off"]) if r["off"] else 0.0
 
 
-def svg_path(points, scale, ox, oy, colour, width, dash=""):
-    step = max(1, len(points) // 600)
-    pts = points[::step]
-    d = " ".join(f"{ox + x * scale:.1f},{oy - y * scale:.1f}" for x, y in pts)
-    dash = f' stroke-dasharray="{dash}"' if dash else ""
-    return (f'<polyline points="{d}" fill="none" stroke="{colour}" '
-            f'stroke-width="{width}"{dash}/>')
-
-
-def plot(chord, arc):
-    """Top view: true path, the chord map, where each version drove, lost packets."""
-    pts = chord["truth"] + chord["drove"] + arc["drove"] + chord["map"]
+def frame(results):
+    """Scale and offset so the track fits the square plot."""
+    pts = results[0]["truth"] + [p for r in results for p in r["drove"]]
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-    span = max(max(xs) - min(xs), max(ys) - min(ys), 1.0)
+    # a slave that drove away would squeeze the track to a dot: clip the view
+    # to the track plus a margin, the runaway leaves the picture
+    tx, ty = [p[0] for p in results[0]["truth"]], [p[1] for p in results[0]["truth"]]
+    margin = 0.25 * max(max(tx) - min(tx), max(ty) - min(ty))
+    x0, x1 = max(min(xs), min(tx) - margin), min(max(xs), max(tx) + margin)
+    y0, y1 = max(min(ys), min(ty) - margin), min(max(ys), max(ty) + margin)
+    span = max(x1 - x0, y1 - y0, 1.0)
     scale = (SIZE - 20) / span
-    ox = 10 - min(xs) * scale + (SIZE - 20 - (max(xs) - min(xs)) * scale) / 2
-    oy = 10 + max(ys) * scale + (SIZE - 20 - (max(ys) - min(ys)) * scale) / 2
+    ox = 10 - x0 * scale + (SIZE - 20 - (x1 - x0) * scale) / 2
+    oy = 10 + y1 * scale + (SIZE - 20 - (y1 - y0) * scale) / 2
+    return scale, ox, oy
+
+
+def polyline(points, scale, ox, oy, colour, width):
+    step = max(1, len(points) // 600)
+    d = " ".join(f"{ox + x * scale:.1f},{oy - y * scale:.1f}" for x, y in points[::step])
+    return (f'<polyline points="{d}" fill="none" stroke="var({colour})" '
+            f'stroke-width="{width}" stroke-linejoin="round"/>')
+
+
+def plot(results, truth_s):
+    """Top view: true path, lost packets, where each drawn fix drove."""
+    scale, ox, oy = frame(results)
+    first = results[0]
     lost = []
-    # mark lost packets on the true path by their distance along it
-    s_points = chord["truth_s"]
-    for s in chord["dropped"][::2]:
-        k = cc.bisect_left(s_points, s)
-        if k < len(chord["truth"]):
-            x, y = chord["truth"][k]
+    for s in first["dropped"][::2]:
+        k = cc.bisect_left(truth_s, s)
+        if k < len(first["truth"]):
+            x, y = first["truth"][k]
             lost.append(f'<circle cx="{ox + x * scale:.1f}" cy="{oy - y * scale:.1f}" '
                         f'r="2.2" fill="var(--lost)"/>')
-    return (f'<svg viewBox="0 0 {SIZE} {SIZE}" class="top">'
-            + svg_path(chord["truth"], scale, ox, oy, "var(--truth)", 6)
-            + "".join(lost)
-            + svg_path(chord["map"], scale, ox, oy, "var(--chord)", 1, "3 3")
-            + svg_path(chord["drove"], scale, ox, oy, "var(--chord)", 1.6)
-            + svg_path(arc["drove"], scale, ox, oy, "var(--arc)", 1.6)
-            + "</svg>")
+    lines = [polyline(r["drove"], scale, ox, oy, m[3], 1.6)
+             for r, m in zip(results, METHODS) if m[4]]
+    return (f'<svg viewBox="0 0 {SIZE} {SIZE}" class="top" style="overflow:hidden">'
+            + polyline(first["truth"], scale, ox, oy, "--truth", 6)
+            + "".join(lost) + "".join(lines) + "</svg>")
 
 
-def chart(chord, arc, top=20.0):
-    """Off the path over time, chord and arc."""
-    w, h = SIZE, 110
-    t_end = max((chord["times"] or [1])[-1], (arc["times"] or [1])[-1])
-    top = max(top, worst(chord), worst(arc))
+def chart(results):
+    """Off the path over time, one line per drawn fix."""
+    w, h = SIZE, 120
+    drawn = [(r, m) for r, m in zip(results, METHODS) if m[4] and r["times"]]
+    t_end = max(r["times"][-1] for r, _ in drawn)
+    top = min(max(20.0, max(worst(r) for r, _ in drawn)), 60.0)
 
     def line(r, colour):
-        if not r["off"]:
-            return ""
         step = max(1, len(r["off"]) // 500)
-        d = " ".join(f"{30 + t / t_end * (w - 40):.1f},{h - 15 - o / top * (h - 25):.1f}"
+        d = " ".join(f"{30 + t / t_end * (w - 40):.1f},{h - 15 - min(o, top) / top * (h - 25):.1f}"
                      for t, o in list(zip(r["times"], r["off"]))[::step])
-        return f'<polyline points="{d}" fill="none" stroke="{colour}" stroke-width="1.4"/>'
+        return f'<polyline points="{d}" fill="none" stroke="var({colour})" stroke-width="1.4"/>'
 
     ticks = "".join(
         f'<line x1="30" x2="{w - 10}" y1="{h - 15 - v / top * (h - 25):.1f}" '
         f'y2="{h - 15 - v / top * (h - 25):.1f}" class="grid"/>'
         f'<text x="26" y="{h - 12 - v / top * (h - 25):.1f}" class="tick">{v:.0f}</text>'
-        for v in (0, 5, 10, 15, 20) if v <= top)
+        for v in range(0, int(top) + 1, 10 if top > 25 else 5))
     return (f'<svg viewBox="0 0 {w} {h}" class="chart">{ticks}'
-            + line(chord, "var(--chord)") + line(arc, "var(--arc)")
-            + f'<text x="{w - 10}" y="{h - 2}" class="tick" text-anchor="end">'
-              f'{t_end:.0f} s</text>'
+            + "".join(line(r, m[3]) for r, m in drawn)
+            + f'<text x="{w - 10}" y="{h - 2}" class="tick">{t_end:.0f} s</text>'
             + '<text x="32" y="10" class="label">cm off the path</text></svg>')
+
+
+def card(lap, name, results, truth_s):
+    numbers = ", ".join(f"<span style='color:var({m[3]})'>{m[0]} {worst(r):.1f}</span>"
+                        for r, m in zip(results, METHODS))
+    return (f"<figure><figcaption><b>lap {lap}</b>, packets lost like {name}<br>"
+            f"worst cm off the path: {numbers}</figcaption>"
+            f"{plot(results, truth_s)}{chart(results)}</figure>")
 
 
 def main(laps):
     patterns = gap_patterns()
-    rows, panels, worst_runs = [], [], []
+    rows, cards, worst_runs = [], [], []
     for lap in laps:
         packets = [json.loads(line) for line in open(lap)]
         lap_name = os.path.basename(lap).replace("master-", "").replace(".jsonl", "")
         path = cc.cs.Path()
         for p in packets:
             path.add(p["s_cm"], p["heading"])
-        truth_s = path.s
         for name, cut in patterns:
-            chord = quiet(cc.simulate, packets, GAP, cut=cut)
-            arc = quiet(cc.simulate, packets, GAP, cut=cut, arc=True)
-            chord["truth_s"] = truth_s
-            rows.append((lap_name, name, worst(chord), worst(arc),
-                         min(chord["gaps"]), max(chord["gaps"]),
-                         min(arc["gaps"]), max(arc["gaps"]),
-                         chord["state"], arc["state"]))
-            if not name.count("moved"):
-                panels.append((lap_name, name, chord, arc))
+            results = [quiet(cc.simulate, packets, GAP, cut=cut, **m[2]) for m in METHODS]
+            rows.append((lap_name, name, results))
+            if "moved" not in name:
+                cards.append(card(lap_name, name, results, path.s))
             else:
-                worst_runs.append((max(worst(chord), worst(arc)), lap_name, name, chord, arc))
+                worst_runs.append((worst(results[0]), card(lap_name, name, results, path.s)))
         for seed in SEEDS:
-            chord = quiet(cc.simulate, packets, GAP, loss=0.2, seed=seed)
-            arc = quiet(cc.simulate, packets, GAP, loss=0.2, seed=seed, arc=True)
-            rows.append((lap_name, f"random 20% lost, seed {seed}", worst(chord),
-                         worst(arc), min(chord["gaps"]), max(chord["gaps"]),
-                         min(arc["gaps"]), max(arc["gaps"]),
-                         chord["state"], arc["state"]))
-
-    print(f"{'lap':16} {'packets lost':32} {'chord max':>9} {'arc max':>8}")
-    for r in rows:
-        print(f"{r[0]:16} {r[1]:32} {r[2]:8.1f}  {r[3]:7.1f}")
+            results = [quiet(cc.simulate, packets, GAP, loss=0.2, seed=seed, **m[2])
+                       for m in METHODS]
+            rows.append((lap_name, f"random 20% lost, seed {seed}", results))
+        print(f"{lap_name}: done")
 
     real = [r for r in rows if r[1].startswith("run")]
-    better = sum(1 for r in real if r[3] < r[2] - 0.2)
-    same = sum(1 for r in real if abs(r[3] - r[2]) <= 0.2)
-    worse = len(real) - better - same
-    summary = (f"With the real gap patterns, the arc was better in {better}, "
-               f"the same in {same} and worse in {worse} of {len(real)} runs. "
-               f"Worst off the path: chord {max(r[2] for r in real):.1f} cm, "
-               f"arc {max(r[3] for r in real):.1f} cm.")
-    print(summary)
+    stats = []
+    for i, m in enumerate(METHODS):
+        w = [worst(r[2][i]) for r in real]
+        stats.append((m, max(w), statistics.median(w), sum(1 for x in w if x > BAD_CM)))
+    print(f"\n{len(real)} runs with real gap patterns, {len(rows) - len(real)} with random loss")
+    print(f"{'fix':10} {'worst':>7} {'median':>7} {'runs over 5 cm':>15}")
+    for m, mx, med, bad in stats:
+        print(f"{m[0]:10} {mx:7.1f} {med:7.1f} {bad:15d}")
 
+    head = "".join(f"<th class='num'>{m[0]}</th>" for m in METHODS)
     table = "".join(
-        f"<tr class='{'ctrl' if r[1].startswith('random') else ''}'>"
-        f"<td>{r[0]}</td><td>{r[1]}</td>"
-        f"<td class='num {'bad' if r[2] > 5 else ''}'>{r[2]:.1f}</td>"
-        f"<td class='num {'bad' if r[3] > 5 else ''}'>{r[3]:.1f}</td>"
-        f"<td class='num'>{r[4]:.0f} to {r[5]:.0f}</td>"
-        f"<td class='num'>{r[6]:.0f} to {r[7]:.0f}</td>"
-        f"<td>{r[8]} / {r[9]}</td></tr>" for r in rows)
+        f"<tr class='{'ctrl' if r[1].startswith('random') else ''}'><td>{r[0]}</td><td>{r[1]}</td>"
+        + "".join(f"<td class='num {'bad' if worst(x) > BAD_CM else ''}'>{worst(x):.1f}</td>"
+                  for x in r[2]) + "</tr>" for r in rows)
+    stat_rows = "".join(
+        f"<tr><td><i class='sw' style='background:var({m[3]})'></i><b>{m[0]}</b></td><td>{m[1]}</td>"
+        f"<td class='num'>{mx:.1f}</td><td class='num'>{med:.1f}</td>"
+        f"<td class='num'>{bad} of {len(real)}</td></tr>" for m, mx, med, bad in stats)
     worst_runs.sort(key=lambda w: -w[0])
-    worst_cards = "".join(
-        f"<figure><figcaption><b>lap {lap}</b>, packets lost like {name}<br>"
-        f"worst off the path: <span class='c'>chord {worst(c):.1f} cm</span>, "
-        f"<span class='a'>arc {worst(a):.1f} cm</span></figcaption>"
-        f"{plot(c, a)}{chart(c, a)}</figure>"
-        for _, lap, name, c, a in worst_runs[:3])
-    cards = "".join(
-        f"<figure><figcaption><b>lap {lap}</b>, packets lost like {name}<br>"
-        f"worst off the path: <span class='c'>chord {worst(c):.1f} cm</span>, "
-        f"<span class='a'>arc {worst(a):.1f} cm</span></figcaption>"
-        f"{plot(c, a)}{chart(c, a)}</figure>"
-        for lap, name, c, a in panels)
+    best = min(stats, key=lambda s: (s[3], s[1]))
+    drawn_key = "".join(f'<span><i class="sw" style="background:var({m[3]})"></i>{m[0]}</span>'
+                        for m in METHODS if m[4])
 
     html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -191,57 +196,53 @@ def main(laps):
 <title>Convoy slave sim</title>
 <style>
 :root {{ --bg:#fbfaf7; --fg:#1d1d1b; --muted:#6b6b66; --line:#e3e0d8;
-  --truth:#d9d4c7; --lost:#e8a33d; --chord:#c8423b; --arc:#2f6db5; }}
+  --truth:#d9d4c7; --lost:#e8a33d; --now:#c8423b; --arc:#2f6db5; --xy:#8a4fbf;
+  --hist:#2e8b57; --both:#0f766e; }}
 @media (prefers-color-scheme: dark) {{ :root {{ --bg:#17181a; --fg:#e8e6e1;
-  --muted:#9a988f; --line:#2c2e31; --truth:#3a3c40; --lost:#e0a050;
-  --chord:#ef6a60; --arc:#6aa3e8; }} }}
-body {{ background:var(--bg); color:var(--fg); margin:0;
-  font:15px/1.5 system-ui, sans-serif; }}
+  --muted:#9a988f; --line:#2c2e31; --truth:#3a3c40; --lost:#e0a050; --now:#ef6a60;
+  --arc:#6aa3e8; --xy:#b48ae0; --hist:#5cc48a; --both:#3fb8ad; }} }}
+body {{ background:var(--bg); color:var(--fg); margin:0; font:15px/1.5 system-ui, sans-serif; }}
 main {{ max-width:1180px; margin:0 auto; padding:24px 16px 60px; }}
 h1 {{ font-size:22px; margin:0 0 4px; }} h2 {{ font-size:17px; margin:36px 0 8px; }}
-p {{ color:var(--muted); max-width:760px; margin:4px 0; }}
-.key span {{ display:inline-block; margin-right:16px; }}
-.key i {{ display:inline-block; width:22px; height:4px; vertical-align:middle;
-  margin-right:6px; border-radius:2px; }}
-.grid-cards {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr));
-  gap:18px; }}
+p {{ color:var(--muted); max-width:780px; margin:4px 0; }}
+.sw {{ display:inline-block; width:18px; height:4px; vertical-align:middle;
+  margin-right:8px; border-radius:2px; }}
+.key span {{ display:inline-block; margin-right:16px; font-size:14px; }}
+.grid-cards {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:18px; }}
 figure {{ margin:0; border:1px solid var(--line); border-radius:8px; padding:12px; }}
 figcaption {{ font-size:13px; color:var(--muted); margin-bottom:6px; }}
-.c {{ color:var(--chord); }} .a {{ color:var(--arc); }}
 svg {{ width:100%; height:auto; display:block; }}
 .chart {{ margin-top:6px; }}
 .grid {{ stroke:var(--line); stroke-width:1; }}
-.tick, .label {{ fill:var(--muted); font-size:10px; }} .chart .tick {{ text-anchor:end; }}
+.tick, .label {{ fill:var(--muted); font-size:10px; }} .tick {{ text-anchor:end; }}
 .summary {{ font-size:16px; color:var(--fg); margin:14px 0; padding:10px 14px;
-  border-left:4px solid var(--arc); background:color-mix(in srgb,var(--arc) 8%,transparent); }}
+  border-left:4px solid var(--hist); background:color-mix(in srgb,var(--hist) 9%,transparent); }}
 .tablewrap {{ overflow-x:auto; }}
 table {{ border-collapse:collapse; font-size:13px; width:100%; }}
-th, td {{ text-align:left; padding:5px 10px; border-bottom:1px solid var(--line);
-  white-space:nowrap; }}
+th, td {{ text-align:left; padding:5px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }}
 .num {{ text-align:right; font-variant-numeric:tabular-nums; }}
-.bad {{ color:var(--chord); font-weight:600; }}
+.bad {{ color:var(--now); font-weight:600; }}
 tr.ctrl td {{ color:var(--muted); }}
 </style></head><body><main>
 <h1>Convoy slave against Mani's recorded laps</h1>
-<p>The slave follows {GAP} cm behind. Each run is done twice: lost stretches
-bridged with a straight chord (the code now) and with an arc. Packets are lost
-like on the real track runs (logs/convoy_slave_*), also moved along the track,
-and with 20 percent random loss as a control.</p>
-<div class="summary">{summary}</div>
-<p class="key"><span><i style="background:var(--truth);height:8px"></i>master's true path</span>
-<span><i style="background:var(--lost)"></i>lost packets</span>
-<span><i style="background:var(--chord)"></i>slave, chord (dashed: its map)</span>
-<span><i style="background:var(--arc)"></i>slave, arc</span></p>
+<p>The slave follows {GAP} cm behind Mani's recorded laps. Packets are lost the way the
+real track runs lost them (logs/convoy_slave_*: the same stretches of track, also moved
+along it), and with 20 percent random loss as a control. Every run is done once per fix.</p>
+<div class="summary">Best: <b>{best[0][0]}</b> ({best[0][1]}): worst {best[1]:.1f} cm off the
+path, {best[3]} of {len(real)} runs over {BAD_CM:.0f} cm. The code now: worst
+{stats[0][1]:.1f} cm, {stats[0][3]} runs over {BAD_CM:.0f} cm.</div>
+<h2>Each fix over {len(real)} runs with real gap patterns</h2>
+<div class="tablewrap"><table><tr><th>fix</th><th>what changes</th><th class="num">worst, cm</th>
+<th class="num">median, cm</th><th class="num">runs over {BAD_CM:.0f} cm</th></tr>{stat_rows}</table></div>
+<p class="key" style="margin-top:14px"><span><i class="sw" style="background:var(--truth);height:8px"></i>master's true path</span>
+<span><i class="sw" style="background:var(--lost)"></i>lost packets</span>
+{drawn_key} (arc and both are in the numbers, not drawn)</p>
 <h2>Top view per lap, real gap patterns</h2>
-<div class="grid-cards">{cards}</div>
-<h2>The 3 worst runs, gaps moved along the track</h2>
-<p>The same real gaps, but falling on a different part of the track.</p>
-<div class="grid-cards">{worst_cards}</div>
-<h2>Every run</h2>
-<div class="tablewrap"><table><tr><th>lap</th><th>packets lost</th>
-<th class="num">chord max off, cm</th><th class="num">arc max off, cm</th>
-<th class="num">chord gap, cm</th><th class="num">arc gap, cm</th>
-<th>end state chord / arc</th></tr>{table}</table></div>
+<div class="grid-cards">{"".join(cards)}</div>
+<h2>The 6 worst runs of the code now, gaps moved along the track</h2>
+<div class="grid-cards">{"".join(c for _, c in worst_runs[:6])}</div>
+<h2>Every run, worst cm off the path</h2>
+<div class="tablewrap"><table><tr><th>lap</th><th>packets lost</th>{head}</tr>{table}</table></div>
 </main></body></html>
 """
     with open(OUT, "w") as f:

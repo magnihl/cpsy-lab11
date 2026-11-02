@@ -68,7 +68,26 @@ def real_gaps(path, min_cm=GAP_MIN_CM):
     return gaps
 
 
-def simulate(packets, gap, loss=0.0, seed=1, cut=(), arc=False):
+HISTORY_S = 2.0  # how much of its recent path the master would resend; 1 s left 3 of 75 runs over 5 cm
+
+
+def with_extras(packets, truth, master):
+    """The packets as a changed master would send them. "xy": its own x, y,
+    which it integrates anyway. "history": also its last HISTORY_S seconds
+    of (s, heading). None: as Mani's master sends them now."""
+    out = []
+    for k, p in enumerate(packets):
+        p = dict(p)
+        if master in ("xy", "both"):
+            p["x_cm"], p["y_cm"] = truth.point(p["s_cm"])
+        if master in ("history", "both"):
+            p["recent_path"] = [[q["s_cm"], q["heading"]] for q in packets[max(0, k - 200):k]
+                                if p["t"] - q["t"] <= HISTORY_S]
+        out.append(p)
+    return out
+
+
+def simulate(packets, gap, loss=0.0, seed=1, cut=(), arc=False, master=None):
     """One convoy run against a recording. Returns what happened, as lists:
     the true path, the slave's map of it, where the slave drove, and how far
     off the path and how far behind it was over time."""
@@ -78,7 +97,7 @@ def simulate(packets, gap, loss=0.0, seed=1, cut=(), arc=False):
         truth.add(p["s_cm"], p["heading"])
     t0 = packets[0]["t"]
     stream = [dict(p, type="map", run=1, running=True, t=p["t"] - t0)
-              for p in packets]
+              for p in with_extras(packets, truth, master)]
     last = stream[-1]
     stream += [dict(last, running=False, t=last["t"] + k * 0.05)
                for k in range(1, 21)]
