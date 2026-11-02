@@ -199,8 +199,12 @@ class WheelSpeed:
 class Slave:
     """What the protocol asks of a slave, without any hardware."""
 
-    def __init__(self, name, gap, heading_scale=1.0, dist_scale=1.0):
+    def __init__(self, name, gap, heading_scale=1.0, dist_scale=1.0,
+                 target=None):
+        # gap: where it starts behind the master, axle to axle, which places
+        # it on the master's path. target: the gap it steers toward
         self.name, self.gap = name, gap
+        self.target = gap if target is None else target
         self.heading_scale, self.dist_scale = heading_scale, dist_scale
         self.state, self.run, self.heard = "waiting", None, None
         self.done = set()
@@ -288,9 +292,9 @@ class Slave:
             self.wheels.reset()
             return 0.0, 0.0
         gap = self.gap_now()
-        speed = clamp(self.master_speed() + GAP_GAIN * (gap - self.gap),
+        speed = clamp(self.master_speed() + GAP_GAIN * (gap - self.target),
                       0.0, MAX_CM_S)
-        if gap < self.gap * MIN_GAP_SHARE:
+        if gap < self.target * MIN_GAP_SHARE:
             speed = 0.0
         if self.state == "stopping" and speed < STOP_CM_S:
             self.state = "idle"
@@ -316,7 +320,8 @@ class Slave:
                 "path_cm": round(self.pose.s - self.gap, 1),
                 "x": round(self.pose.x, 1), "y": round(self.pose.y, 1),
                 "heading": round(self.pose.heading, 4),
-                "gap_cm": round(self.gap_now(), 1), "set_gap_cm": self.gap}
+                "gap_cm": round(self.gap_now(), 1),
+                "set_gap_cm": round(self.target, 1)}
 
 
 def wiggle(ticks, motors, interrupted=None):
@@ -449,7 +454,12 @@ def main():
     if use_ir:
         from distance import Distance
         sensor = Distance()
-    slave = Slave(args.name, gap, args.heading_scale, args.dist_scale)
+    # with ir it closes up to the page's middle, 30 cm nose to tail, from
+    # wherever it was put down
+    target = (config.CONVOY_NOSE_TO_TAIL_CM + config.NOSE_TO_AXLE_CM
+              + config.LEADER_TAIL_TO_AXLE_CM if use_ir else gap)
+    slave = Slave(args.name, gap, args.heading_scale, args.dist_scale,
+                  target)
     print(f"slave {args.name}, "
           f"{'gap from the IR sensor' if use_ir else f'{gap:.0f} cm behind the master'}, heading "
           f"scale {args.heading_scale}, distance scale {args.dist_scale}. "
@@ -522,8 +532,9 @@ def main():
                     new = (cm + config.NOSE_TO_AXLE_CM
                            + config.LEADER_TAIL_TO_AXLE_CM)
                     if not seen_ir or abs(new - slave.gap) > 1.0:
-                        print(f"IR {cm:.0f} cm nose to tail, gap {new:.0f} cm "
-                              "axle to axle")
+                        print(f"IR {cm:.0f} cm nose to tail, start gap "
+                              f"{new:.0f} cm axle to axle, steers to "
+                              f"{slave.target:.0f}")
                     slave.gap, seen_ir = new, True
                     slave.pose = Pose(slave.gap)
             ticks = hw.ticks()

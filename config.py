@@ -164,6 +164,8 @@ CONVOY_DIST_SCALE = 1.0
 # its axle: his notes give a 14 cm body with the nose 9.5 cm ahead of the
 # axle. his spoiler sticks out further: axle to the back of the spoiler
 # 12 to 13 cm, measured 2 Nov
+# the gap the slave keeps, nose to tail: the middle of the page's 20 to 40
+CONVOY_NOSE_TO_TAIL_CM = 30.0
 NOSE_TO_AXLE_CM = 7.0
 LEADER_TAIL_TO_AXLE_CM = 12.5
 # power to cm/s on the floor for the convoy slave, from floortable.py.
