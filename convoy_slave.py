@@ -487,6 +487,7 @@ def main():
     shown = None
     next_ir = 0.0
     seen_ir = False
+    recent_ir = collections.deque(maxlen=8)
     next_step = time.monotonic()
     try:
         hw.motors(0, 0)
@@ -508,6 +509,10 @@ def main():
                 next_ir = now + 0.25
                 _, cm = sensor.read()
                 if cm and 20 <= cm <= 150:
+                    # median of the last 2 s: the beam half on, half under
+                    # the master's spoiler jumped 20 to 37 cm standing still
+                    recent_ir.append(cm)
+                    cm = sorted(recent_ir)[len(recent_ir) // 2]
                     new = (cm + config.NOSE_TO_AXLE_CM
                            + config.LEADER_TAIL_TO_AXLE_CM)
                     if not seen_ir or abs(new - slave.gap) > 1.0:
