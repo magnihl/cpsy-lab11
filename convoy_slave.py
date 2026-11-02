@@ -3,6 +3,7 @@
 convoy (github.com/ManiTiTz/raunkerfi, linefollower/convoy/README.md).
 
   python3 convoy_slave.py --gap 60
+  python3 convoy_slave.py --gap ir             start gap from the IR sensor
   python3 convoy_slave.py --gap 60 --heading-scale 1.01
   python3 convoy_slave.py --wiggle-test        one wiggle, no master
   python3 convoy_slave.py --wiggle-test --wiggle-power 0.12 --wiggle-coast 0.2
@@ -379,8 +380,9 @@ def main():
     global WIGGLE_POWER, WIGGLE_COAST_S
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--name", default=socket.gethostname().split(".")[0])
-    parser.add_argument("--gap", type=float, default=60.0,
-                        help="cm behind the master along its path, axle to axle")
+    parser.add_argument("--gap", default="ir",
+                        help="cm behind the master along its path, axle to "
+                        "axle, or ir: measured before each run")
     parser.add_argument("--live", help="laptop running the live view, "
                         "default: the address in the master's packets")
     parser.add_argument("--heading-scale", type=float,
@@ -407,8 +409,17 @@ def main():
     sock.bind(("", MAP_PORT))
     sock.setblocking(False)
     live = (socket.gethostbyname(args.live), LIVE_PORT) if args.live else None
-    slave = Slave(args.name, args.gap, args.heading_scale, args.dist_scale)
-    print(f"slave {args.name}, {args.gap:.0f} cm behind the master, heading "
+    use_ir = args.gap == "ir"
+    # with ir, a start value until the first reading: 30 cm between them
+    gap = (30.0 + config.NOSE_TO_AXLE_CM + config.LEADER_TAIL_TO_AXLE_CM
+           if use_ir else float(args.gap))
+    sensor = None
+    if use_ir:
+        from distance import Distance
+        sensor = Distance()
+    slave = Slave(args.name, gap, args.heading_scale, args.dist_scale)
+    print(f"slave {args.name}, "
+          f"{'gap from the IR sensor' if use_ir else f'{gap:.0f} cm behind the master'}, heading "
           f"scale {args.heading_scale}, distance scale {args.dist_scale}. "
           "Ctrl+C stops.")
     rows = []
@@ -448,6 +459,8 @@ def main():
         return slave.driving
 
     shown = None
+    next_ir = 0.0
+    seen_ir = False
     next_step = time.monotonic()
     try:
         hw.motors(0, 0)
@@ -462,6 +475,20 @@ def main():
                 print(f"wiggle done, {left_over:+.1f} degrees from the start")
                 next_step = time.monotonic()
                 continue
+            if sensor and not slave.driving and now >= next_ir:
+                # the page's gap is nose to tail, which the IR sees. the
+                # path gap is axle to axle, so both overhangs are added.
+                # only between runs: it is the start pose of the next run
+                next_ir = now + 0.25
+                _, cm = sensor.read()
+                if cm and 20 <= cm <= 150:
+                    new = (cm + config.NOSE_TO_AXLE_CM
+                           + config.LEADER_TAIL_TO_AXLE_CM)
+                    if not seen_ir or abs(new - slave.gap) > 1.0:
+                        print(f"IR {cm:.0f} cm nose to tail, gap {new:.0f} cm "
+                              "axle to axle")
+                    slave.gap, seen_ir = new, True
+                    slave.pose = Pose(slave.gap)
             ticks = hw.ticks()
             left, right = slave.step(now, ticks)
             hw.motors(left, right)

@@ -159,6 +159,11 @@ TRACK_ORDER = ("red", "blue", "green")
 # on closed laps, see convoy_slave.py and tune_scale.py
 CONVOY_HEADING_SCALE = 1.0
 CONVOY_DIST_SCALE = 1.0
+# from the front of this rover (the IR sensor) back to its axle, the
+# wheel centres, measured 2 Nov. and from the back of Mani's car to its
+# axle: his notes give a 14 cm body with the nose 9.5 cm ahead of the axle
+NOSE_TO_AXLE_CM = 7.0
+LEADER_TAIL_TO_AXLE_CM = 4.5
 # power to cm/s on the floor for the convoy slave, from floortable.py.
 # None uses the wheels-in-the-air table in convoy_slave.py
 FLOOR_SPEED_TABLE = None
