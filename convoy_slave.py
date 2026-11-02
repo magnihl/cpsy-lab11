@@ -14,10 +14,10 @@ its run number, whether it is driving, and its distance s_cm and heading
 gap cm straight behind the master, rebuilds the master's path as points
 (s, x, y) and drives it by pure pursuit, its speed set by the gap along
 the path. It joins only a run whose start it heard, stops if the master
-goes quiet for LOST_S, and brakes to its gap when the run ends. A
-"wiggle" command turns it 5 degrees left, then right, twice, on the spot,
-and back to straight, as the master does. Status
-goes to the laptop's live view on UDP 5006.
+goes quiet for LOST_S and carries on when it is heard again, and brakes
+to its gap when the run ends. A "wiggle" command turns it 5 degrees left,
+then right, twice, on the spot, and back to straight, as the master does.
+Status goes to the laptop's live view on UDP 5006.
 
 The two scales match this rover to the master's counting: both count
 their own wheels and are off by a few percent, the master's heading
@@ -219,7 +219,9 @@ class Slave:
 
     @property
     def driving(self):
-        return self.state in ("follow", "stopping")
+        # lost is still inside the run: it waits for the master to be heard
+        # again and carries on, the packets hold totals so nothing is missed
+        return self.state in ("follow", "stopping", "lost")
 
     def hear(self, packet, now):
         """One map packet from the master."""
@@ -239,13 +241,16 @@ class Slave:
         if not running and not self.driving:
             self.run = run
         if running and run != self.run:
-            if s < START_CM and not self.driving:
+            if s < START_CM and self.state not in ("follow", "stopping"):
                 self.new_run(run)
                 self.path.add(0.0, 0.0)
                 self.state, self.wants_wiggle = "follow", None
             else:
                 # joined after the start: sit this run out
                 self.run, self.state = run, "missed"
+        if run == self.run and self.state == "lost" and running:
+            print("heard the master again, carrying on")
+            self.state = "follow"
         if run == self.run and self.driving:
             if s > self.master_s:
                 self.master_s = s
@@ -276,11 +281,12 @@ class Slave:
         if not self.driving:
             self.wheels.reset()
             return 0.0, 0.0
+        # the wheels still roll on after a stop, so the pose keeps counting
+        self.pose.update(ticks)
         if self.heard is None or now - self.heard > LOST_S:
             self.state = "lost"
             self.wheels.reset()
             return 0.0, 0.0
-        self.pose.update(ticks)
         gap = self.gap_now()
         speed = clamp(self.master_speed() + GAP_GAIN * (gap - self.gap),
                       0.0, MAX_CM_S)
