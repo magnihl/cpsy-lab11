@@ -37,6 +37,10 @@ KD = 0.095 * RPM
 # the sim needs a fresh reading every 20 ms or less; the wheel controller
 # keeps its own slower interval, its encoder speed gets noisy any faster
 STEER_INTERVAL = 0.01
+# the distance read takes several pigpio round trips, so it runs less often
+# and never in the same loop as the wheel update: together they made 1 loop
+# in 10 take 45 to 55 ms. 200 ms is at most 2 cm at these speeds
+DISTANCE_INTERVAL = 0.2
 
 if config.EDGE_BLACK is None or config.EDGE_WHITE is None:
     sys.exit("set EDGE_BLACK and EDGE_WHITE in config.py first, "
@@ -52,7 +56,7 @@ rover = Rover(estop)
 left = Wheel(config.LEFT_ENCODER)
 right = Wheel(config.RIGHT_ENCODER)
 control = SpeedController(rover, left, right)
-sensor = Distance()
+sensor = Distance(samples=3)  # median of 3 still rejects one bad read, 10 was too slow
 colour = ColourSensor()
 
 print(f"edge {SIDE} at {RPM:.0f} rpm ({config.rpm_to_cm_s(RPM):.0f} cm/s) "
@@ -70,9 +74,18 @@ try:
     start = time.monotonic()
     last_t = start
     last_control = start
+    last_distance = start
+    next_tick = start
     last_err = edge_read(colour.read()) - 0.5
     while time.monotonic() - start < DURATION:
-        time.sleep(STEER_INTERVAL)
+        # sleep only what is left of the 10 ms, so the work inside the loop
+        # does not add to it; when a loop ran late, start the rhythm again
+        next_tick += STEER_INTERVAL
+        wait = next_tick - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        else:
+            next_tick = time.monotonic()
         now = time.monotonic()
         reading = colour.read()
         read = edge_read(reading)
@@ -86,16 +99,19 @@ try:
             # a turn slows or stops the inner wheel, it never runs backwards
             control.target(max(0.0, RPM + turn), max(0.0, RPM - turn))
 
-        # wheel control and the distance check at their usual pace
+        # wheel control at its usual pace, the distance check in a different
+        # loop, so no single loop does both slow jobs
         if now - last_control >= config.CONTROL_INTERVAL:
             last_control = now
+            wheels = control.update()
+        elif now - last_distance >= DISTANCE_INTERVAL:
+            last_distance = now
             volts, cm = sensor.read()
             # latched, as in follow.py: once stopped it stays stopped
             if STOP_CM > 0 and not stopped and cm is not None and cm <= STOP_CM:
                 stopped = True
                 control.stop()
                 print(f"{now - start:5.2f} s  STOP  {cm:.0f} cm")
-            wheels = control.update()
 
         (lr, ld), (rr, rd) = wheels
         rows.append((round(now - start, 3), *reading, round(read, 3),
