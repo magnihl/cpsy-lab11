@@ -34,10 +34,12 @@ ENCODER_GLITCH_US = 50
 # own motor, the PID in Lab 7 proved those pairs belong together
 LEFT_MOTOR = MOTOR_B
 RIGHT_MOTOR = MOTOR_A
-# both wires of each wheel since 2 Nov: GPIO16 pulses again
-# (encodertest.py), so Wheel counts every change on both, four a pulse
-LEFT_ENCODER = ENCODER_B
-RIGHT_ENCODER = ENCODER_A
+# one wire per wheel. counting every change on both (2 Nov) made the
+# convoy slave worse: without decoding, a wire's noise while its motor
+# runs is counted too, which quadrature would cancel. Wheel still takes
+# a pair for that
+LEFT_ENCODER = ENCODER_PIN_B
+RIGHT_ENCODER = ENCODER_PIN_A
 
 SLEEP_PIN = "GPIO25"
 STOP_PIN = "GPIO4"
