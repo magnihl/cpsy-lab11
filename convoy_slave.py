@@ -24,7 +24,8 @@ their own wheels and are off by a few percent, the master's heading
 reads 91 to 99 percent of its real turning. tune_scale.py finds the
 heading scale from a closed lap.
 
-Every control step is logged to convoy_slave_<time>.csv.
+Every control step of a run is logged to convoy_slave_<time>_run<N>.csv,
+written as the run ends. convoy-slave.service starts it at boot.
 """
 
 import argparse
@@ -33,6 +34,7 @@ import collections
 import csv
 import json
 import math
+import signal
 import socket
 import time
 
@@ -376,6 +378,28 @@ def wiggle(ticks, motors, interrupted=None):
     return ((right - r0) - (left - l0)) / per_degree
 
 
+LOG_HEADER = ["t", "run", "state", "since_packet", "master_s", "master_cm_s",
+              "master_heading", "own_s", "own_heading", "gap", "left_power",
+              "right_power", "heading_scale", "dist_scale"]
+
+
+def write_log(rows, run):
+    """One csv per run, written as the run ends, so switching the rover
+    off loses nothing."""
+    name = f"convoy_slave_{time.strftime('%H%M%S')}_run{run}.csv"
+    with open(name, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(LOG_HEADER)
+        w.writerows(rows)
+    print(f"wrote {name}, {len(rows)} rows")
+
+
+def _stop_on_signal(number, _frame):
+    # systemd stops the service with SIGTERM, closing ssh sends SIGHUP:
+    # both stop it the way Ctrl+C does, motors off and the log written
+    raise KeyboardInterrupt
+
+
 def main():
     global WIGGLE_POWER, WIGGLE_COAST_S
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -398,6 +422,8 @@ def main():
     args = parser.parse_args()
     WIGGLE_POWER, WIGGLE_COAST_S = args.wiggle_power, args.wiggle_coast
 
+    for number in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(number, _stop_on_signal)
     import hw
     if args.wiggle_test:
         print(f"wiggle test, power {WIGGLE_POWER}, coast {WIGGLE_COAST_S} s")
@@ -495,6 +521,9 @@ def main():
             if slave.state != shown:
                 print(f"{slave.state} (run {slave.run})")
                 shown = slave.state
+                if rows and not slave.driving:
+                    write_log(rows, rows[-1][1])
+                    rows = []
             if now >= next_status:
                 report()
                 next_status = now + 1 / STATUS_HZ
@@ -515,15 +544,8 @@ def main():
         pass
     finally:
         hw.motors(0, 0)
-        name = f"convoy_slave_{time.strftime('%H%M%S')}.csv"
-        with open(name, "w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["t", "run", "state", "since_packet", "master_s",
-                        "master_cm_s", "master_heading", "own_s",
-                        "own_heading", "gap", "left_power", "right_power",
-                        "heading_scale", "dist_scale"])
-            w.writerows(rows)
-        print(f"wrote {name}, {len(rows)} rows")
+        if rows:
+            write_log(rows, rows[-1][1])
 
 
 if __name__ == "__main__":

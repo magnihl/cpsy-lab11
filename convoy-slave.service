@@ -1,0 +1,23 @@
+# Starts the convoy slave when the rover boots, and again if it crashes.
+# Install once on the Pi, from the repo folder:
+#   sudo cp convoy-slave.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now convoy-slave
+# Watch it:  journalctl -u convoy-slave -f
+# Stop it before running anything else on the motors (rc.py, calibrate.py):
+#   sudo systemctl stop convoy-slave
+[Unit]
+Description=CPSY Lab 11 convoy slave
+Wants=network-online.target pigpiod.service
+After=network-online.target pigpiod.service
+
+[Service]
+User=magni
+WorkingDirectory=/home/magni/projects/cpsy-lab11
+# the newest code first, a failed pull (no network) does not stop it
+ExecStartPre=-/usr/bin/git pull --ff-only
+ExecStart=/usr/bin/python3 -u convoy_slave.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
