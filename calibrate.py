@@ -82,14 +82,27 @@ right = Wheel(config.RIGHT_ENCODER)
 control = SpeedController(rover, left, right)
 
 if MODE == "push":
-    # motors off, the driver asleep, the wheels turn freely by hand
+    # motors off, the driver asleep, the wheels turn freely by hand. both
+    # wires are counted as well (quadrature): clean one-wire counting
+    # gives exactly 4 quadrature counts per pulse. slow by hand, so this Pi
+    # keeps up, it cannot while driving
+    from quad import QuadEncoders
+    enc = QuadEncoders({"left": tuple(int(p[4:]) for p in config.ENCODER_B),
+                        "right": tuple(int(p[4:]) for p in config.ENCODER_A)})
     try:
         input(f"axle at 0 on the tape measure, wheels along it. Enter ")
         left.reset()
         right.reset()
+        quad0 = dict(enc.counts)
         input(f"push it slowly and straight until the axle is at {CHECK_CM:g} "
               "cm. Enter ")
         pulses = (left.pulses, right.pulses)
+        quad = [abs(enc.counts[w] - quad0[w]) for w in ("left", "right")]
+        print(f"both wires: left {quad[0]}, right {quad[1]} counts, "
+              f"{quad[0] / max(pulses[0], 1):.3f} and "
+              f"{quad[1] / max(pulses[1], 1):.3f} per pulse (clean is 4), "
+              f"{enc.missed} lost")
+        enc.close()
     finally:
         estop.close()
         left.close()
