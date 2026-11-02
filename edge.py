@@ -3,7 +3,8 @@
 
 The sensor sits half on the line and half on the floor. edge_read gives
 0.5 there, more when it drifts onto the floor, less when it drifts onto
-the line, and the difference steers the rover back (PD, like his sim).
+the line, and the difference steers the rover back (PI, tuned in the
+edge sim).
 Turns slow or stop one wheel, never reverse it.
 
   python3 edge.py                  20 rpm, 20 s, left edge, stop at 30 cm
@@ -30,10 +31,19 @@ DURATION = float(sys.argv[2]) if len(sys.argv) > 2 else 20.0
 SIDE = sys.argv[3] if len(sys.argv) > 3 else "left"
 STOP_CM = float(sys.argv[4]) if len(sys.argv) > 4 else 30.0
 
-# Mani's sim steers with kp 0.7 and kd 0.035 on top of a 0.37 power base;
-# the same gains scaled to this rover's rpm base
-KP = 1.9 * RPM
-KD = 0.095 * RPM
+# tuned in the edge sim (~/Projects/edge-sim), 2 Nov: a small P, no D and an
+# I term. P alone has to sit off the edge to hold a curve (read 0.58 on
+# the outer curve); the I term learns the turn the curve needs instead.
+# was KP 1.9, KD 0.095 (Mani's gains scaled to rpm), lost the line at 40 rpm
+KP = 0.57 * RPM
+KD = 0.0
+KI = 2.0 * RPM
+# the I sum only grows while the spot sees some of both black and white:
+# fully on one colour says nothing about how far off it is, and the sum
+# wound up at the start and threw the rover across the line in the sim
+I_SEEN = (0.05, 0.95)
+# the I part adds at most KI * I_LIMIT = 0.5 * RPM to the turn
+I_LIMIT = 0.25
 # the sim needs a fresh reading every 20 ms or less; the wheel controller
 # keeps its own slower interval, its encoder speed gets noisy any faster
 STEER_INTERVAL = 0.01
@@ -60,7 +70,7 @@ sensor = Distance(samples=3)  # median of 3 still rejects one bad read, 10 was t
 colour = ColourSensor()
 
 print(f"edge {SIDE} at {RPM:.0f} rpm ({config.rpm_to_cm_s(RPM):.0f} cm/s) "
-      f"for {DURATION:.0f} s, kp {KP:.1f} kd {KD:.2f}, "
+      f"for {DURATION:.0f} s, kp {KP:.1f} kd {KD:.2f} ki {KI:.0f}, "
       f"{'distance stop off' if STOP_CM <= 0 else f'stop at {STOP_CM:.0f} cm'}")
 
 name = f"edge_{RPM:.0f}_{SIDE}_{time.strftime('%H%M%S')}.csv"
@@ -77,6 +87,7 @@ try:
     last_distance = start
     next_tick = start
     last_err = edge_read(colour.read()) - 0.5
+    isum = 0.0
     while time.monotonic() - start < DURATION:
         # sleep only what is left of the 10 ms, so the work inside the loop
         # does not add to it; when a loop ran late, start the rhythm again
@@ -93,7 +104,9 @@ try:
         dt = now - last_t
         der = (err - last_err) / dt if dt > 0 else 0.0
         last_err, last_t = err, now
-        turn = SIGN * (KP * err + KD * der)
+        if I_SEEN[0] < read < I_SEEN[1]:
+            isum = max(-I_LIMIT, min(I_LIMIT, isum + err * dt))
+        turn = SIGN * (KP * err + KD * der + KI * isum)
 
         if not stopped:
             # a turn slows or stops the inner wheel, it never runs backwards
@@ -117,14 +130,15 @@ try:
         rows.append((round(now - start, 3), *reading, round(read, 3),
                      round(err, 3), round(turn, 1),
                      "" if cm is None else round(cm, 1), int(stopped),
-                     round(lr, 1), round(ld, 4), round(rr, 1), round(rd, 4)))
+                     round(lr, 1), round(ld, 4), round(rr, 1), round(rd, 4),
+                     round(isum, 4)))
     control.stop()
 finally:
     with open(name, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["t", "red", "green", "blue", "clear", "read", "error",
                     "turn", "cm", "stopped",
-                    "left_rpm", "left_duty", "right_rpm", "right_duty"])
+                    "left_rpm", "left_duty", "right_rpm", "right_duty", "isum"])
         w.writerows(rows)
     print(f"wrote {name}, {len(rows)} rows")
     estop.close()
