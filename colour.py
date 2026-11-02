@@ -152,3 +152,14 @@ def drift(reading, target, order=config.TRACK_ORDER, white=config.WHITE):
     r, g, b, _ = reading
     ratio = dict(zip(COLOURS, (r / white[0], g / white[1], b / white[2])))
     return ratio[order[i + 1]] - ratio[order[i - 1]]
+
+
+def edge_read(reading, black=None, white=None):
+    """How much of the sensor spot sees white: 0 all black, 1 all white.
+
+    Sitting on the edge of the line gives 0.5, the point edge.py steers to.
+    """
+    black = config.EDGE_BLACK if black is None else black
+    white = config.EDGE_WHITE if white is None else white
+    clear = reading[3]
+    return max(0.0, min(1.0, (clear - black) / (white - black)))

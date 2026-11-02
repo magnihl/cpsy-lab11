@@ -133,8 +133,8 @@ def turn_rate_deg_s(left_rpm, right_rpm, track_cm=TRACK_CM):
 # --- colour sensor -------------------------------------------------
 # 100 ms and gain 4 as in Lab 2. at the default 2.4 ms the blue line
 # read (4, 3, 3, 11), the same as no light. 20 Oct
-COLOUR_INTEGRATION_MS = 100
-COLOUR_GAIN = 4
+COLOUR_INTEGRATION_MS = 10
+COLOUR_GAIN = 16
 
 # (red, green, blue, clear) on the white canvas, Exhibit 10A, 20 Oct.
 # depends on room light and sensor height, measure again each session
@@ -184,3 +184,10 @@ try:
     from config_local import *  # noqa: F401,F403
 except ImportError:
     pass
+
+# --- edge following ------------------------------------------------
+# clear count with the sensor fully on the black line and fully on the
+# white floor, at the integration and gain above. measure both with
+# colourtest.py before running edge.py
+EDGE_BLACK = None
+EDGE_WHITE = None
