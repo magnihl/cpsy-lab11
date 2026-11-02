@@ -94,14 +94,21 @@ WHEEL_CIRCUMFERENCE_CM = 3.14159 * WHEEL_DIAMETER_CM   # 15.1 cm
 # 29 Oct: left 13.10 13.07 13.22, right 13.28 13.34 13.16. 22 percent
 # above the 10.8 cm ruler measurement centre to centre: the tyres slip
 # sideways in a turn, so the rover turns less than the geometry says
-TRACK_CM = 13.19
+# 2 Nov, Mani's spin method instead: 2 turns on the spot at 60 rpm a
+# wheel, 12.59 12.78 12.64 with the push values above. the convoy copies
+# his map, which he measured this way, so his method is used here
+TRACK_CM = 12.67
 
 # cm per encoder pulse, per wheel. calibrate.py roll, 2 m, three runs,
 # 29 Oct: left 0.02036 0.02048 0.02039, right 0.02031 0.02044 0.02037.
 # 6.6 percent below circumference / PULSES_PER_REV (0.02176), likely the
 # tyres squashing under the rover's weight
-LEFT_CM_PER_PULSE = 0.02041
-RIGHT_CM_PER_PULSE = 0.02037
+# 2 Nov, Mani's push method instead: pushed by hand 100 cm, motors off,
+# three times: left 0.02032 0.02017 0.02014, right 0.02040 0.02020
+# 0.02015. both wires counted 4.00 per pulse, so the counting is clean.
+# about 1 percent under the rolls, which slip a little under power
+LEFT_CM_PER_PULSE = 0.02021
+RIGHT_CM_PER_PULSE = 0.02025
 
 
 def rpm_to_cm_s(rpm):
