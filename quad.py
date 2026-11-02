@@ -51,7 +51,8 @@ class QuadEncoders:
         self._state = {w: [level[a], level[b]] for w, (a, b) in pins.items()}
         self._last_seqno = None
         self._stop = threading.Event()
-        threading.Thread(target=self._watch, daemon=True).start()
+        self._thread = threading.Thread(target=self._watch, daemon=True)
+        self._thread.start()
 
     def _watch(self):
         rising = gpiod.EdgeEvent.Type.RISING_EDGE
@@ -78,5 +79,8 @@ class QuadEncoders:
                     self.counts[wheel] += step
 
     def close(self):
+        # let the thread finish its wait before the lines go, or it reads
+        # a released request and dies with an exception
         self._stop.set()
+        self._thread.join(timeout=0.5)
         self._request.release()
