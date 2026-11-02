@@ -146,7 +146,7 @@ finally:
         right.close()
         disconnect()
 
-print(f"pulses  left {pulses[0]}  right {pulses[1]}")
+print(f"pulses  left {pulses[0]:g}  right {pulses[1]:g}")
 if MODE == "roll":
     forward = float(input("cm forward, along the tape measure: "))
     side = float(input("cm to the side, right positive, Enter for 0: ") or 0)

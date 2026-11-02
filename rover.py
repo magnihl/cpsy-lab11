@@ -40,35 +40,54 @@ def disconnect():
 class Wheel:
     """Odometer and speedometer for one wheel.
 
-    Counts rising edges on one encoder channel using pigpio's tally,
-    which is kept in C and never calls back into Python. gpiozero's
-    RotaryEncoder decodes quadrature in Python and tops out around 2300
-    edges a second across all four pins, well below what these motors
-    produce.
+    Counts edges with pigpio's tally, which is kept in C and never calls
+    back into Python, so this Pi keeps up at any speed. Given both of a
+    wheel's encoder wires it counts every change on both, four per pulse,
+    and pulses divides by four: the same units as one wire, finer. Given
+    one wire it counts its rising edges, one per pulse.
 
-    The tally only ever increases, so distance and speed are unsigned.
-    The caller knows which way it commanded the motor.
+    Decoding the direction from the order of the changes would need
+    Python for every edge, which this Pi Zero W cannot keep up with (most
+    edges lost, 2 Nov). So the count only ever increases, and the caller
+    knows which way it commanded the motor.
     """
 
-    def __init__(self, pin, pulses_per_rev=config.PULSES_PER_REV):
+    def __init__(self, pins, pulses_per_rev=config.PULSES_PER_REV):
         pi = _connect()
-        # pigpio takes BCM numbers, config stores gpiozero's GPIOnn form
-        self._gpio = int(pin.replace("GPIO", ""))
-        pi.set_mode(self._gpio, pigpio.INPUT)
-        pi.set_pull_up_down(self._gpio, pigpio.PUD_UP)
-        # pigpiod ignores level changes shorter than this, in C. 0 is off
-        pi.set_glitch_filter(self._gpio, config.ENCODER_GLITCH_US)
-        # no function, so pigpio keeps the count itself
-        self._cb = pi.callback(self._gpio, pigpio.RISING_EDGE)
+        if isinstance(pins, str):
+            pins = (pins,)
+        # one wire: rising edges, one a pulse. both: every change, four
+        edge = pigpio.RISING_EDGE if len(pins) == 1 else pigpio.EITHER_EDGE
+        self._per_pulse = 1 if len(pins) == 1 else 2 * len(pins)
+        self._cbs = []
+        for pin in pins:
+            # pigpio takes BCM numbers, config stores gpiozero's GPIOnn form
+            gpio = int(pin.replace("GPIO", ""))
+            pi.set_mode(gpio, pigpio.INPUT)
+            pi.set_pull_up_down(gpio, pigpio.PUD_UP)
+            # pigpiod ignores level changes shorter than this, in C. 0 is off
+            pi.set_glitch_filter(gpio, config.ENCODER_GLITCH_US)
+            # no function, so pigpio keeps the count itself
+            self._cbs.append(pi.callback(gpio, edge))
         self._ppr = pulses_per_rev
         self._origin = 0
         self._last_count = 0
         self._last_time = time.monotonic()
 
+    def _count(self):
+        return sum(cb.tally() for cb in self._cbs)
+
+    @property
+    def wires(self):
+        """Each wire's own count since start. Both should be equal: a wire
+        that counts more is picking up noise."""
+        return [cb.tally() for cb in self._cbs]
+
     @property
     def pulses(self):
-        """Raw edges since the last reset. Used for calibration."""
-        return self._cb.tally() - self._origin
+        """Pulses since the last reset, a quarter pulse fine with both
+        wires. Used for calibration."""
+        return (self._count() - self._origin) / self._per_pulse
 
     @property
     def rotations(self):
@@ -81,7 +100,7 @@ class Wheel:
         interval is less noisy but slower to react.
         """
         now = time.monotonic()
-        count = self._cb.tally()
+        count = self._count()
 
         elapsed = now - self._last_time
         moved = count - self._last_count
@@ -91,15 +110,16 @@ class Wheel:
 
         if elapsed <= 0:
             return 0.0
-        return (moved / self._ppr) / elapsed * 60
+        return (moved / self._per_pulse / self._ppr) / elapsed * 60
 
     def reset(self):
-        self._origin = self._cb.tally()
+        self._origin = self._count()
         self._last_count = self._origin
         self._last_time = time.monotonic()
 
     def close(self):
-        self._cb.cancel()
+        for cb in self._cbs:
+            cb.cancel()
 
 
 class Rover:
