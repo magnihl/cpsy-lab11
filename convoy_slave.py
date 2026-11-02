@@ -107,11 +107,17 @@ def table_power(speed):
 
 
 class Path:
-    """The master's path as points (s, x, y) in its start frame."""
+    """The master's path as points (s, x, y) in its start frame.
 
-    def __init__(self):
+    arc: bridge each step as a circular arc instead of a straight chord.
+    The same for small steps; across a lost stretch in a curve the chord
+    goes too far, the arc does not. Off until convoy_check shows it helps.
+    """
+
+    def __init__(self, arc=False):
         self.s, self.x, self.y = [], [], []
         self.heading = 0.0
+        self.arc = arc
 
     def add(self, s, heading):
         if self.s and s <= self.s[-1]:
@@ -120,6 +126,10 @@ class Path:
             # integrate the step along the mean heading
             ds = s - self.s[-1]
             mid = (heading + self.heading) / 2
+            if self.arc:
+                # an arc of length ds turning by turn ends ds * sinc(turn / 2) away
+                half = (heading - self.heading) / 2
+                ds *= math.sin(half) / half if abs(half) > 1e-9 else 1.0
             x = self.x[-1] + ds * math.cos(mid)
             y = self.y[-1] + ds * math.sin(mid)
         else:
@@ -200,12 +210,13 @@ class Slave:
     """What the protocol asks of a slave, without any hardware."""
 
     def __init__(self, name, gap, heading_scale=1.0, dist_scale=1.0,
-                 target=None):
+                 target=None, arc=False):
         # gap: where it starts behind the master, axle to axle, which places
         # it on the master's path. target: the gap it steers toward
         self.name, self.gap = name, gap
         self.target = gap if target is None else target
         self.heading_scale, self.dist_scale = heading_scale, dist_scale
+        self.arc = arc
         self.state, self.run, self.heard = "waiting", None, None
         self.done = set()
         self.wants_wiggle = None
@@ -215,7 +226,7 @@ class Slave:
 
     def new_run(self, run):
         self.run = run
-        self.path = Path()
+        self.path = Path(arc=self.arc)
         self.recent = collections.deque()
         self.master_s = 0.0
         self.pose = Pose(self.gap)
