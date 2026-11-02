@@ -152,6 +152,9 @@ TRACK_ORDER = ("red", "blue", "green")
 # on closed laps, see convoy_slave.py and tune_scale.py
 CONVOY_HEADING_SCALE = 1.0
 CONVOY_DIST_SCALE = 1.0
+# power to cm/s on the floor for the convoy slave, from floortable.py.
+# None uses the wheels-in-the-air table in convoy_slave.py
+FLOOR_SPEED_TABLE = None
 
 # --- per rover -----------------------------------------------------
 # another rover running this code puts its own pins and calibration in

@@ -63,6 +63,8 @@ STOP_CM_S = 2.0
 SPEED_TABLE = ((0.0, 0.0), (0.05, 2.9), (0.10, 22.0), (0.15, 32.0),
                (0.20, 37.8), (0.25, 41.4), (0.30, 44.3), (0.50, 49.8),
                (1.0, 54.4))
+if config.FLOOR_SPEED_TABLE:
+    SPEED_TABLE = config.FLOOR_SPEED_TABLE
 MAX_CM_S = SPEED_TABLE[-1][1]
 KP = 0.004
 KI = 0.02

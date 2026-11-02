@@ -5,6 +5,9 @@
   python3 calibrate.py circle left     40 / 20 rpm circle, Enter to stop
   python3 calibrate.py circle right
   python3 calibrate.py check 100       drive 100 cm by encoder, then stop
+  python3 calibrate.py roll 150        the same at 150 rpm, about 35 cm/s
+  python3 calibrate.py circle left 150 outer wheel 150, inner 75 rpm
+  python3 calibrate.py check 100 150
 
 roll: drive slowly past a measured length, stop with Enter, then type
 how far the rover moved forward along a tape measure laid beside the
@@ -39,9 +42,15 @@ from rover import disconnect, Rover, SpeedController, Wheel
 MODE = sys.argv[1] if len(sys.argv) > 1 else "roll"
 SIDE = sys.argv[2] if len(sys.argv) > 2 else "left"
 CHECK_CM = float(sys.argv[2]) if MODE == "check" and len(sys.argv) > 2 else 100.0
-ROLL_RPM = 30.0
-OUTER_RPM = 40.0
-INNER_RPM = 20.0
+# the speed is the last argument: roll RPM, circle SIDE RPM, check CM RPM.
+# 30 rpm is about 7 cm/s, the convoy runs at 30 to 40 cm/s, about 150 rpm
+SPEED_ARG = {"roll": 2, "circle": 3, "check": 3}.get(MODE)
+ROLL_RPM = (float(sys.argv[SPEED_ARG]) if SPEED_ARG and len(sys.argv) > SPEED_ARG
+            else 30.0)
+# circles: the outer wheel at the speed given, the inner at half, the
+# shape of the 20 / 40 rpm circles
+OUTER_RPM = ROLL_RPM if MODE == "circle" and len(sys.argv) > 3 else 40.0
+INNER_RPM = OUTER_RPM / 2
 
 if MODE not in ("roll", "circle", "check"):
     sys.exit(f"{MODE} is not roll, circle or check")
@@ -79,8 +88,9 @@ try:
     else:
         sys.stdin.readline()
     control.stop()
-    # the wheels coast a little after the stop, count that too
-    time.sleep(0.5)
+    # the wheels coast after the stop, count that too. at 35 cm/s that is
+    # several cm and most of a second
+    time.sleep(1.0)
     pulses = (left.pulses, right.pulses)
 finally:
     estop.close()
@@ -117,7 +127,7 @@ else:
     print(f"left {left_cm:.1f} cm  right {right_cm:.1f} cm  "
           f"track {track:.2f} cm")
 
-name = f"calibrate_{MODE}_{time.strftime('%H%M%S')}.csv"
+name = f"calibrate_{MODE}_{targets[0]:.0f}_{time.strftime('%H%M%S')}.csv"
 with open(name, "w", newline="") as f:
     w = csv.writer(f)
     w.writerow(["mode", "side", "left_target", "right_target",
