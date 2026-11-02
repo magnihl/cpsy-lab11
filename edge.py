@@ -3,14 +3,19 @@
 
 The sensor sits half on the line and half on the floor. edge_read gives
 0.5 there, more when it drifts onto the floor, less when it drifts onto
-the line, and the difference steers the rover back (PI, tuned in the
-edge sim).
-Turns slow or stop one wheel, never reverse it.
+the line, and the difference steers the rover back (PD, like his sim).
+
+Two modes. rpm (the default) sets wheel speeds through the wheel PI;
+turns slow or stop one wheel, never reverse it. power steers straight on
+the motor duty around a base duty, the way Mani's car does, and lets the
+inner wheel run backwards in a sharp turn. power is the fast one: the
+wheel PI is too slow to steer with above about 30 rpm (edge sim, 2 Nov).
 
   python3 edge.py                  20 rpm, 20 s, left edge, stop at 30 cm
   python3 edge.py 25 60            25 rpm for 60 s
   python3 edge.py 20 20 right      the right edge of the line
   python3 edge.py 20 20 left 0     distance stop off, for testing
+  python3 edge.py 0.2 30 left 0 power   base duty 0.2, about 16 s a lap
 
 Start with the sensor on the chosen edge. Every loop is logged to
 edge_<rpm>_<side>_<time>.csv. Ctrl+C stops it, so does the e-stop button.
@@ -30,20 +35,17 @@ RPM = float(sys.argv[1]) if len(sys.argv) > 1 else 20.0
 DURATION = float(sys.argv[2]) if len(sys.argv) > 2 else 20.0
 SIDE = sys.argv[3] if len(sys.argv) > 3 else "left"
 STOP_CM = float(sys.argv[4]) if len(sys.argv) > 4 else 30.0
+MODE = sys.argv[5] if len(sys.argv) > 5 else "rpm"
 
-# tuned in the edge sim (~/Projects/edge-sim), 2 Nov: a small P, no D and an
-# I term. P alone has to sit off the edge to hold a curve (read 0.58 on
-# the outer curve); the I term learns the turn the curve needs instead.
-# was KP 1.9, KD 0.095 (Mani's gains scaled to rpm), lost the line at 40 rpm
-KP = 0.57 * RPM
-KD = 0.0
-KI = 2.0 * RPM
-# the I sum only grows while the spot sees some of both black and white:
-# fully on one colour says nothing about how far off it is, and the sum
-# wound up at the start and threw the rover across the line in the sim
-I_SEEN = (0.05, 0.95)
-# the I part adds at most KI * I_LIMIT = 0.5 * RPM to the turn
-I_LIMIT = 0.25
+# Mani's sim steers with kp 0.7 and kd 0.035 on top of a 0.37 power base;
+# the same gains scaled to this rover's rpm base
+KP = 1.9 * RPM
+KD = 0.095 * RPM
+if MODE == "power":
+    # the first argument is the base duty, and his gains apply as they are
+    BASE = RPM
+    KP = 0.7
+    KD = 0.035
 # the sim needs a fresh reading every 20 ms or less; the wheel controller
 # keeps its own slower interval, its encoder speed gets noisy any faster
 STEER_INTERVAL = 0.01
@@ -57,6 +59,10 @@ if config.EDGE_BLACK is None or config.EDGE_WHITE is None:
              "measured with colourtest.py on the line and on the floor")
 if SIDE not in ("left", "right"):
     sys.exit(f"{SIDE} is not left or right")
+if MODE not in ("rpm", "power"):
+    sys.exit(f"{MODE} is not rpm or power")
+if MODE == "power" and not 0 < RPM <= 0.4:
+    sys.exit(f"power mode takes a base duty from 0 to 0.4, not {RPM}")
 # on the left edge more white means the rover drifted left, so it turns
 # right: left wheel faster. the right edge is the mirror image
 SIGN = 1 if SIDE == "left" else -1
@@ -69,11 +75,14 @@ control = SpeedController(rover, left, right)
 sensor = Distance(samples=3)  # median of 3 still rejects one bad read, 10 was too slow
 colour = ColourSensor()
 
-print(f"edge {SIDE} at {RPM:.0f} rpm ({config.rpm_to_cm_s(RPM):.0f} cm/s) "
-      f"for {DURATION:.0f} s, kp {KP:.1f} kd {KD:.2f} ki {KI:.0f}, "
+SPEED_TEXT = (f"base duty {RPM:.2f}" if MODE == "power"
+              else f"{RPM:.0f} rpm ({config.rpm_to_cm_s(RPM):.0f} cm/s)")
+print(f"edge {SIDE} at {SPEED_TEXT} "
+      f"for {DURATION:.0f} s, kp {KP:.1f} kd {KD:.2f}, "
       f"{'distance stop off' if STOP_CM <= 0 else f'stop at {STOP_CM:.0f} cm'}")
 
-name = f"edge_{RPM:.0f}_{SIDE}_{time.strftime('%H%M%S')}.csv"
+LABEL = f"p{RPM:.2f}" if MODE == "power" else f"{RPM:.0f}"
+name = f"edge_{LABEL}_{SIDE}_{time.strftime('%H%M%S')}.csv"
 rows = []
 stopped = False
 cm = None
@@ -87,7 +96,6 @@ try:
     last_distance = start
     next_tick = start
     last_err = edge_read(colour.read()) - 0.5
-    isum = 0.0
     while time.monotonic() - start < DURATION:
         # sleep only what is left of the 10 ms, so the work inside the loop
         # does not add to it; when a loop ran late, start the rhythm again
@@ -104,19 +112,29 @@ try:
         dt = now - last_t
         der = (err - last_err) / dt if dt > 0 else 0.0
         last_err, last_t = err, now
-        if I_SEEN[0] < read < I_SEEN[1]:
-            isum = max(-I_LIMIT, min(I_LIMIT, isum + err * dt))
-        turn = SIGN * (KP * err + KD * der + KI * isum)
+        turn = SIGN * (KP * err + KD * der)
 
-        if not stopped:
+        if MODE == "power":
+            # duty straight to the motors, negative runs a wheel backwards
+            duty_l = max(-1.0, min(1.0, BASE + turn))
+            duty_r = max(-1.0, min(1.0, BASE - turn))
+            if stopped or not estop.armed:
+                duty_l = duty_r = 0.0
+            rover.left_motor.value = duty_l
+            rover.right_motor.value = duty_r
+        elif not stopped:
             # a turn slows or stops the inner wheel, it never runs backwards
             control.target(max(0.0, RPM + turn), max(0.0, RPM - turn))
 
         # wheel control at its usual pace, the distance check in a different
-        # loop, so no single loop does both slow jobs
+        # loop, so no single loop does both slow jobs. in power mode only
+        # the wheel speeds are read, for the log
         if now - last_control >= config.CONTROL_INTERVAL:
             last_control = now
-            wheels = control.update()
+            if MODE == "power":
+                wheels = ((left.speed(), duty_l), (right.speed(), duty_r))
+            else:
+                wheels = control.update()
         elif now - last_distance >= DISTANCE_INTERVAL:
             last_distance = now
             volts, cm = sensor.read()
@@ -124,23 +142,25 @@ try:
             if STOP_CM > 0 and not stopped and cm is not None and cm <= STOP_CM:
                 stopped = True
                 control.stop()
+                rover.stop()
                 print(f"{now - start:5.2f} s  STOP  {cm:.0f} cm")
 
         (lr, ld), (rr, rd) = wheels
         rows.append((round(now - start, 3), *reading, round(read, 3),
                      round(err, 3), round(turn, 1),
                      "" if cm is None else round(cm, 1), int(stopped),
-                     round(lr, 1), round(ld, 4), round(rr, 1), round(rd, 4),
-                     round(isum, 4)))
+                     round(lr, 1), round(ld, 4), round(rr, 1), round(rd, 4)))
     control.stop()
 finally:
     with open(name, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["t", "red", "green", "blue", "clear", "read", "error",
                     "turn", "cm", "stopped",
-                    "left_rpm", "left_duty", "right_rpm", "right_duty", "isum"])
+                    "left_rpm", "left_duty", "right_rpm", "right_duty"])
         w.writerows(rows)
     print(f"wrote {name}, {len(rows)} rows")
+    # motors off before anything else closes, whatever ended the run
+    rover.stop()
     estop.close()
     sensor.close()
     colour.close()
