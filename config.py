@@ -189,5 +189,5 @@ except ImportError:
 # clear count with the sensor fully on the black line and fully on the
 # white floor, at the integration and gain above. measure both with
 # colourtest.py before running edge.py
-EDGE_BLACK = None
-EDGE_WHITE = None
+EDGE_BLACK = 255   # colour_black_173509.csv, steady part
+EDGE_WHITE = 1400  # colour_white, 1300 to 1510
